@@ -5,5 +5,13 @@
   "assistantName": "Byte",
   "tone": "friendly, warm and concise",
   "fallbackContact": "hello@beanandbyte.example or (555) 010-2040",
-  "language": "auto"
+  "language": "auto",
+  "brandColor": "#8a5a3b",
+  "suggestedQuestions": [
+    "Do you have oat milk?",
+    "What time do you open on Sunday?",
+    "Can I get a refund on a gift card?",
+    "How does the loyalty program work?",
+    "Can you cater a meeting for 30 people?"
+  ]
 }

@@ -89,6 +89,44 @@ describe("GeminiClient", () => {
     await assert.rejects(client.generate(req), /no text.*MAX_TOKENS/);
   });
 
+  it("streams text pieces from Server-Sent Events", async () => {
+    const sse = [
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "Hel" }] } }] })}`,
+      "",
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "lo [1]" }] }, finishReason: "STOP" }] })}`,
+      "",
+      "",
+    ].join("\r\n");
+    // Split the bytes at awkward places to test buffering across chunks.
+    const bytes = new TextEncoder().encode(sse);
+    const body = new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += 7) controller.enqueue(bytes.slice(i, i + 7));
+        controller.close();
+      },
+    });
+    const { impl, calls } = fakeFetch([new Response(body, { status: 200 })]);
+    const client = new GeminiClient({ apiKey: "k", fetchImpl: impl, chatModel: "m" });
+
+    const pieces: string[] = [];
+    for await (const p of client.stream({ system: "", messages: [{ role: "user", text: "hi" }] })) pieces.push(p);
+
+    assert.deepEqual(pieces, ["Hel", "lo [1]"]);
+    assert.ok(calls[0].url.endsWith("/models/m:streamGenerateContent?alt=sse"));
+  });
+
+  it("fails a stream that produces no text", async () => {
+    const body = `data: ${JSON.stringify({ candidates: [{ finishReason: "SAFETY" }] })}\n\n`;
+    const { impl } = fakeFetch([new Response(body, { status: 200 })]);
+    const client = new GeminiClient({ apiKey: "k", fetchImpl: impl });
+    const consume = async () => {
+      for await (const _ of client.stream({ system: "", messages: [{ role: "user", text: "hi" }] })) {
+        // drain
+      }
+    };
+    await assert.rejects(consume(), /no text.*SAFETY/);
+  });
+
   it("records model and size so a changed config triggers re-indexing", () => {
     const a = new GeminiClient({ apiKey: "k", embedDimensions: 768 });
     const b = new GeminiClient({ apiKey: "k", embedDimensions: 1536 });

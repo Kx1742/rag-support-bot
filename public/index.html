@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Support Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="avatar" id="avatar" aria-hidden="true">?</div>
+        <div class="title">
+          <h1 id="business-name">Loading…</h1>
+          <p class="subtitle">
+            <span id="assistant-line">Support assistant</span>
+            <span class="badge" id="fictional-badge" hidden>Fictional demo business</span>
+            <span class="badge badge-warn" id="mode-badge" hidden>Offline mode</span>
+          </p>
+        </div>
+        <button class="ghost" id="new-chat" type="button" title="Start a new conversation">New chat</button>
+      </header>
+
+      <main class="messages" id="messages" aria-live="polite">
+        <section class="welcome" id="welcome">
+          <h2 id="welcome-title">Hi! How can I help?</h2>
+          <p>Answers come from the business's own documents, with sources.</p>
+          <div class="suggestions" id="suggestions"></div>
+        </section>
+      </main>
+
+      <form class="composer" id="composer">
+        <textarea
+          id="input"
+          rows="1"
+          maxlength="1000"
+          placeholder="Ask a question…"
+          aria-label="Your message"
+          autocomplete="off"
+        ></textarea>
+        <button type="submit" id="send" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M3 20.5 21 12 3 3.5l2.5 8.5L3 20.5Zm2.5-8.5H13" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+        </button>
+      </form>
+      <p class="footnote">AI answers can be wrong. Don't share personal or payment details.</p>
+    </div>
+  </body>
+</html>

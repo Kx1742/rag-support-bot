@@ -136,7 +136,16 @@ describe("Assistant", () => {
     ]);
     const queryCall = embedder.calls.at(-1)!;
     assert.equal(queryCall.kind, "query");
-    assert.match(queryCall.texts[0], /Sunday opening hours\?\nand later\?/);
+    assert.deepEqual(queryCall.texts, ["and later?", "Sunday opening hours?\nand later?"]);
+  });
+
+  it("finds a new topic even right after an unrelated question", async () => {
+    const { assistant } = await makeAssistant();
+    const answer = await assistant.ask("Sunday opening hours?", [
+      { role: "user", text: "weather forecast Paris rain umbrella tomorrow" },
+      { role: "assistant", text: "I don't know." },
+    ]);
+    assert.equal(answer.sources[0]?.docId, "hours.md");
   });
 
   it("rejects empty questions", async () => {

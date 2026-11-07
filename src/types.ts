@@ -10,6 +10,10 @@ export interface TenantConfig {
   fallbackContact: string;
   /** "auto" = reply in the customer's language. */
   language?: string;
+  /** Example questions shown as buttons in the chat UI. */
+  suggestedQuestions?: string[];
+  /** Brand color for the chat UI, e.g. "#7a4a2a". */
+  brandColor?: string;
 }
 
 export interface SourceDocument {
@@ -47,8 +51,15 @@ export interface EmbeddingProvider {
   embed(texts: string[], kind: EmbedKind): Promise<number[][]>;
 }
 
+export interface ChatRequest {
+  system: string;
+  messages: ChatMessage[];
+}
+
 /** Anything that can generate a chat reply. */
 export interface ChatProvider {
   readonly model: string;
-  generate(request: { system: string; messages: ChatMessage[] }): Promise<string>;
+  generate(request: ChatRequest): Promise<string>;
+  /** Optional token-by-token streaming. Falls back to generate() when missing. */
+  stream?(request: ChatRequest): AsyncIterable<string>;
 }

@@ -4,8 +4,12 @@
   "description": "Multi-tenant customer-support chatbot that answers from a business's own documents (RAG + Gemini).",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=23.6" },
+  "engines": {
+    "node": ">=23.6"
+  },
   "scripts": {
+    "start": "node src/server/main.ts",
+    "dev": "node --watch src/server/main.ts",
     "ingest": "node src/cli/ingest.ts",
     "chat": "node src/cli/chat.ts",
     "test": "node --test \"test/**/*.test.ts\"",
