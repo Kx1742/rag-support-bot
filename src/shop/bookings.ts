@@ -97,18 +97,23 @@ export class BookingService {
   }
 
   /** Bookable start times for a date and party size. */
-  availableTimes(date: string, partySize: number, opts: { staff?: boolean } = {}): { times: string[]; reason?: string } {
+  availableTimes(date: string, partySize: number, opts: { staff?: boolean; tableId?: string } = {}): { times: string[]; reason?: string } {
     this.assertParty(partySize);
     const closed = this.dayProblem(date, opts.staff);
     if (closed) return { times: [], reason: closed };
 
     const busy = this.busyByTable(date);
     const times = this.slotStarts(date, opts.staff).filter(
-      (start) => this.freeTable(busy, start, start + this.config.booking.durationMinutes, partySize) !== null,
+      (start) => this.freeTable(busy, start, start + this.config.booking.durationMinutes, partySize, opts.tableId) !== null,
     );
     return times.length
       ? { times: times.map(fromMinutes) }
-      : { times: [], reason: `Sorry, we're fully booked for ${partySize} on ${describeDate(date)}.` };
+      : {
+          times: [],
+          reason: opts.tableId
+            ? `That table has no free slot for ${partySize} on ${describeDate(date)}.`
+            : `Sorry, we're fully booked for ${partySize} on ${describeDate(date)}.`,
+        };
   }
 
   /** Checks one specific time, suggesting the closest alternatives when it's taken. */

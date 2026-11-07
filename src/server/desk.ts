@@ -82,7 +82,9 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
     }
     case "GET /availability": {
       const partySize = Number(url.searchParams.get("partySize") ?? 2);
-      return ok(res, shop.bookings.availableTimes(date ?? shop.bookings.today().date, partySize, { staff: true }));
+      const tableId = url.searchParams.get("tableId") || undefined;
+      if (tableId && !shop.config.tables.some((t) => t.id === tableId)) throw new HttpError(400, "Unknown table");
+      return ok(res, shop.bookings.availableTimes(date ?? shop.bookings.today().date, partySize, { staff: true, tableId }));
     }
     case "GET /menu":
       return ok(res, { menu: shop.menu.list() });
@@ -167,9 +169,17 @@ function liveEvents(req: IncomingMessage, res: ServerResponse, shop: Shop, heart
   sendSse(res, "ready", { ok: true });
   const onChange = (change: ShopChange) => {
     // New bookings carry a short summary so the desk can announce them whatever date it shows.
-    const booking = change.kind === "booking" && change.action === "created" ? shop.bookings.get(Number(change.id)) : null;
-    const summary = booking && { name: booking.name, date: booking.date, time: booking.time, partySize: booking.partySize, source: booking.source };
-    sendSse(res, "change", summary ? { ...change, booking: summary } : change);
+    // New bookings and orders carry a short summary so the desk can announce them.
+    const created = change.action === "created";
+    const booking = created && change.kind === "booking" ? shop.bookings.get(Number(change.id)) : null;
+    const order = created && change.kind === "order" ? shop.orders.get(Number(change.id)) : null;
+    sendSse(res, "change", {
+      ...change,
+      ...(booking && {
+        booking: { name: booking.name, date: booking.date, time: booking.time, partySize: booking.partySize, source: booking.source },
+      }),
+      ...(order && { order: { number: order.number, type: order.type, tableId: order.tableId } }),
+    });
   };
   const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), heartbeatMs);
   shop.events.on("change", onChange);

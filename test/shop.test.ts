@@ -48,6 +48,14 @@ describe("booking availability", () => {
     assert.equal(shop.bookings.availableTimes("2026-11-15", 2).times.at(-1), "13:30"); // Sunday 9-15
   });
 
+  it("can check one specific table", async () => {
+    const { shop } = await makeShop();
+    shop.bookings.create({ date: "2026-11-14", time: "10:00", partySize: 6, name: "Group", phone: "5550104444" }, "web");
+    const big = shop.bookings.availableTimes("2026-11-14", 2, { staff: true, tableId: "T6" }).times;
+    assert.ok(!big.includes("10:00") && !big.includes("11:00") && big.includes("11:30"));
+    assert.ok(shop.bookings.availableTimes("2026-11-14", 2, { staff: true, tableId: "T1" }).times.includes("10:00"));
+  });
+
   it("respects the notice period today", async () => {
     const { shop } = await makeShop();
     assert.equal(shop.bookings.availableTimes("2026-11-13", 2).times[0], "11:00"); // now 10:00 + 60 min

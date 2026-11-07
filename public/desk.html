@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#2b1d14" />
     <title>Shop Desk</title>
     <link rel="stylesheet" href="/desk.css" />
     <script src="/desk.js" defer></script>
@@ -10,108 +11,212 @@
   <body>
     <!-- Login -->
     <main class="login" id="login-view" hidden>
-      <form class="card login-card" id="login-form">
+      <form class="login-card" id="login-form">
+        <div class="login-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9Zm13 1h1.5a2.5 2.5 0 0 1 0 5H17M7 3c0 1.5 1 1.5 1 3M11 3c0 1.5 1 1.5 1 3" /></svg>
+        </div>
         <h1>Shop desk</h1>
-        <p class="muted">Staff only. Log in to manage orders and bookings.</p>
-        <label>Business ID <input id="login-tenant" autocomplete="organization" required /></label>
-        <label>Password <input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <p class="muted">Staff only. Log in to run the till, orders and bookings.</p>
+        <label class="field">Business ID <input id="login-tenant" autocomplete="organization" autocapitalize="none" required /></label>
+        <label class="field">Password <input id="login-password" type="password" autocomplete="current-password" required /></label>
         <p class="error" id="login-error" role="alert"></p>
-        <button class="primary" type="submit">Log in</button>
+        <button class="btn btn-primary btn-lg btn-block" type="submit">Log in</button>
       </form>
     </main>
 
     <!-- Desk -->
     <div class="desk" id="desk-view" hidden>
       <header class="topbar">
-        <strong class="brand" id="desk-title">Shop desk</strong>
-        <nav class="tabs" role="tablist">
-          <button role="tab" data-tab="till" aria-selected="true">Till</button>
-          <button role="tab" data-tab="orders">Orders <span class="count" id="orders-count" hidden></span></button>
-          <button role="tab" data-tab="bookings">Bookings</button>
-          <button role="tab" data-tab="menu">Menu</button>
+        <div class="topbar-brand">
+          <strong id="desk-title">Shop desk</strong>
+          <span class="clock" id="clock" aria-label="Shop time"></span>
+        </div>
+
+        <nav class="nav" role="tablist" aria-label="Desk sections">
+          <button role="tab" data-tab="till" aria-selected="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4zM6 9v10h12V9M9 13h6" /></svg>
+            <span>Till</span>
+          </button>
+          <button role="tab" data-tab="orders" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v18l-2.5-1.5L12 21l-2.5-1.5L7 21zM10 8h4M10 12h4" /></svg>
+            <span>Orders</span>
+            <b class="nav-badge" id="badge-orders" hidden></b>
+          </button>
+          <button role="tab" data-tab="bookings" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v5M16 3v5" /></svg>
+            <span>Bookings</span>
+            <b class="nav-badge warn" id="badge-bookings" hidden></b>
+          </button>
+          <button role="tab" data-tab="menu" aria-selected="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h3" /></svg>
+            <span>Menu</span>
+            <b class="nav-badge muted-badge" id="badge-menu" hidden></b>
+          </button>
         </nav>
-        <span class="live" id="live" title="Live updates">● Live</span>
-        <button class="ghost" id="logout" type="button">Log out</button>
+
+        <div class="topbar-tools">
+          <span class="live" id="live"><i></i><span id="live-text">Live</span></span>
+          <button class="icon-btn" id="sound-toggle" type="button" aria-pressed="true" title="Alert sound">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9H3v6h3l5 4V5zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>
+            <span class="sr-only">Alert sound</span>
+          </button>
+          <button class="icon-btn" id="logout" type="button" title="Log out">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10" /></svg>
+            <span class="sr-only">Log out</span>
+          </button>
+        </div>
       </header>
 
       <!-- Till -->
-      <section class="tab-panel till" data-panel="till">
+      <section class="panel till" data-panel="till">
         <div class="till-menu">
-          <div class="pills" id="category-pills"></div>
+          <div class="till-toolbar">
+            <div class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM20 20l-4-4" /></svg>
+              <input id="item-search" type="search" placeholder="Find an item…" autocomplete="off" aria-label="Find an item" />
+            </div>
+          </div>
+          <div class="categories" id="category-pills" role="toolbar" aria-label="Categories"></div>
           <div class="item-grid" id="item-grid"></div>
         </div>
-        <aside class="ticket card">
-          <h2>New order</h2>
-          <div class="segmented" id="order-type">
-            <button type="button" data-type="takeaway" aria-pressed="true">Takeaway</button>
-            <button type="button" data-type="dine_in" aria-pressed="false">Dine in</button>
+
+        <aside class="ticket" aria-label="Current order">
+          <div class="ticket-head">
+            <h2>New order</h2>
+            <button class="btn btn-ghost btn-sm" id="clear-ticket" type="button">Clear</button>
           </div>
-          <label id="table-field" hidden>Table <select id="order-table"></select></label>
-          <label>Customer name <input id="order-name" maxlength="60" placeholder="Optional" /></label>
+
+          <div class="segmented" id="order-type" role="radiogroup" aria-label="Order type">
+            <button type="button" role="radio" data-type="takeaway" aria-checked="true">Takeaway</button>
+            <button type="button" role="radio" data-type="dine_in" aria-checked="false">Dine in</button>
+          </div>
+          <div class="table-chips" id="table-chips" hidden role="radiogroup" aria-label="Table"></div>
+
+          <input class="input" id="order-name" maxlength="60" placeholder="Customer name (optional)" aria-label="Customer name" />
+
           <ul class="ticket-lines" id="ticket-lines"></ul>
-          <p class="muted empty-ticket" id="empty-ticket">Tap items to add them.</p>
-          <label>Notes <input id="order-notes" maxlength="300" placeholder="e.g. extra hot" /></label>
-          <div class="ticket-total"><span>Total</span><strong id="ticket-total">$0.00</strong></div>
+          <div class="ticket-empty" id="empty-ticket">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v18l-2.5-1.5L12 21l-2.5-1.5L7 21z" /></svg>
+            <p>Tap items to start an order</p>
+          </div>
+
+          <input class="input" id="order-notes" maxlength="300" placeholder="Notes for the kitchen" aria-label="Notes for the kitchen" />
+
           <p class="error" id="ticket-error" role="alert"></p>
-          <button class="primary" id="send-order" type="button" disabled>Send to kitchen</button>
-          <button class="ghost small" id="clear-ticket" type="button">Clear</button>
-          <p class="muted tiny">Payments aren't handled yet. Take payment at the counter.</p>
+          <div class="ticket-foot">
+            <div class="ticket-total">
+              <span id="ticket-count">0 items</span>
+              <strong id="ticket-total">$0.00</strong>
+            </div>
+            <button class="btn btn-primary btn-xl btn-block" id="send-order" type="button" disabled>Send to kitchen</button>
+            <p class="hint">Payments aren't handled yet. Take payment at the counter.</p>
+          </div>
         </aside>
       </section>
 
-      <!-- Orders -->
-      <section class="tab-panel" data-panel="orders" hidden>
+      <!-- Orders (kitchen display) -->
+      <section class="panel" data-panel="orders" hidden>
         <div class="stats" id="order-stats"></div>
         <div class="board">
-          <div class="column"><h3>New</h3><div id="col-new"></div></div>
-          <div class="column"><h3>Preparing</h3><div id="col-preparing"></div></div>
-          <div class="column"><h3>Ready</h3><div id="col-ready"></div></div>
+          <section class="lane lane-new">
+            <header><h2>New</h2><b id="count-new">0</b></header>
+            <div class="lane-body" id="col-new"></div>
+          </section>
+          <section class="lane lane-preparing">
+            <header><h2>Preparing</h2><b id="count-preparing">0</b></header>
+            <div class="lane-body" id="col-preparing"></div>
+          </section>
+          <section class="lane lane-ready">
+            <header><h2>Ready for pickup</h2><b id="count-ready">0</b></header>
+            <div class="lane-body" id="col-ready"></div>
+          </section>
         </div>
-        <details class="done-orders">
+        <details class="history">
           <summary id="done-summary">Completed &amp; cancelled</summary>
-          <div id="col-done"></div>
+          <div class="history-grid" id="col-done"></div>
         </details>
       </section>
 
       <!-- Bookings -->
-      <section class="tab-panel" data-panel="bookings" hidden>
-        <div class="toolbar">
-          <button class="ghost" id="prev-day" type="button" aria-label="Previous day">‹</button>
-          <input type="date" id="booking-date" />
-          <button class="ghost" id="next-day" type="button" aria-label="Next day">›</button>
-          <button class="ghost" id="today-btn" type="button">Today</button>
-          <span class="muted" id="booking-stats"></span>
-          <button class="primary" id="new-booking-btn" type="button">+ New booking</button>
+      <section class="panel bookings" data-panel="bookings" hidden>
+        <div class="day-bar">
+          <div class="day-nav">
+            <button class="icon-btn" id="prev-day" type="button" aria-label="Previous day">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <label class="day-label">
+              <strong id="day-title">Today</strong>
+              <input type="date" id="booking-date" aria-label="Choose date" />
+            </label>
+            <button class="icon-btn" id="next-day" type="button" aria-label="Next day">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+            </button>
+            <button class="btn btn-ghost btn-sm" id="today-btn" type="button">Today</button>
+          </div>
+          <span class="day-stats" id="booking-stats"></span>
+          <button class="btn btn-primary" id="new-booking-btn" type="button">+ New booking</button>
         </div>
 
-        <form class="card booking-form" id="booking-form" hidden>
-          <h3>New booking</h3>
-          <div class="form-grid">
-            <label>Date <input type="date" id="nb-date" required /></label>
-            <label>People <input type="number" id="nb-party" min="1" value="2" required /></label>
-            <label>Table <select id="nb-table"><option value="">Any free table</option></select></label>
-            <label>Name <input id="nb-name" maxlength="80" required /></label>
-            <label>Phone <input id="nb-phone" type="tel" placeholder="Optional for walk-ins" /></label>
-            <label>Notes <input id="nb-notes" maxlength="300" /></label>
-          </div>
-          <p class="muted small">Pick a time:</p>
-          <div class="time-slots" id="nb-times"></div>
-          <p class="error" id="nb-error" role="alert"></p>
-          <div class="form-actions">
-            <button class="ghost" type="button" id="nb-cancel">Close</button>
-            <button class="primary" type="submit" id="nb-submit" disabled>Create booking</button>
-          </div>
-        </form>
+        <section class="floor" id="floor-section" aria-label="Tables">
+          <h2 class="section-title">Tables right now</h2>
+          <div class="floor-grid" id="floor"></div>
+        </section>
 
-        <div class="booking-list" id="booking-list"></div>
+        <div id="booking-sections"></div>
       </section>
 
       <!-- Menu -->
-      <section class="tab-panel" data-panel="menu" hidden>
-        <p class="muted">Mark items as sold out. Sold-out items can't be added to orders.</p>
+      <section class="panel" data-panel="menu" hidden>
+        <div class="menu-bar">
+          <p class="muted" id="menu-summary">Tap an item to mark it sold out. Sold-out items can't be added at the till.</p>
+          <button class="btn btn-ghost btn-sm" id="restock-all" type="button" hidden>Mark all available</button>
+        </div>
         <div class="menu-admin" id="menu-admin"></div>
       </section>
     </div>
+
+    <!-- New booking dialog -->
+    <dialog class="sheet" id="booking-dialog" aria-labelledby="nb-title">
+      <form id="booking-form" method="dialog">
+        <header class="sheet-head">
+          <h2 id="nb-title">New booking</h2>
+          <button class="icon-btn" type="button" id="nb-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <div class="form-row">
+            <label class="field">Date <input class="input" type="date" id="nb-date" required /></label>
+            <div class="field">
+              People
+              <div class="stepper">
+                <button type="button" id="nb-party-minus" aria-label="Fewer people">−</button>
+                <output id="nb-party">2</output>
+                <button type="button" id="nb-party-plus" aria-label="More people">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            Table
+            <div class="table-chips" id="nb-tables" role="radiogroup" aria-label="Table"></div>
+          </div>
+          <div class="field">
+            Time
+            <div class="time-slots" id="nb-times"></div>
+          </div>
+          <div class="form-row">
+            <label class="field">Name <input class="input" id="nb-name" maxlength="80" required autocomplete="off" /></label>
+            <label class="field">Phone <input class="input" id="nb-phone" type="tel" placeholder="Optional for walk-ins" autocomplete="off" /></label>
+          </div>
+          <label class="field">Notes <input class="input" id="nb-notes" maxlength="300" placeholder="e.g. high chair, birthday" /></label>
+          <p class="error" id="nb-error" role="alert"></p>
+        </div>
+        <footer class="sheet-foot">
+          <button class="btn btn-ghost" type="button" id="nb-cancel">Close</button>
+          <button class="btn btn-primary btn-lg" type="submit" id="nb-submit" disabled>Create booking</button>
+        </footer>
+      </form>
+    </dialog>
 
     <div class="toasts" id="toasts" aria-live="polite"></div>
   </body>
