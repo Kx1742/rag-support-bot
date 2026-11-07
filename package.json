@@ -1,0 +1,18 @@
+{
+  "name": "rag-support-bot",
+  "version": "0.1.0",
+  "description": "Multi-tenant customer-support chatbot that answers from a business's own documents (RAG + Gemini).",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=23.6" },
+  "scripts": {
+    "ingest": "node src/cli/ingest.ts",
+    "chat": "node src/cli/chat.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

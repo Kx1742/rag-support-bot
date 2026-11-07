@@ -1,0 +1,42 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import type { SourceDocument, TenantConfig } from "./types.ts";
+
+const SUPPORTED_EXTENSIONS = [".md", ".txt"];
+
+export const TENANTS_DIR = resolve(import.meta.dirname, "..", "tenants");
+export const DATA_DIR = resolve(import.meta.dirname, "..", "data");
+
+/** Tenant ids become folder names, so only allow safe characters. */
+export function assertValidTenantId(id: string): void {
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(id)) {
+    throw new Error(`Invalid tenant id "${id}". Use lowercase letters, numbers and dashes.`);
+  }
+}
+
+export function indexPath(tenantId: string, dataDir = DATA_DIR): string {
+  assertValidTenantId(tenantId);
+  return join(dataDir, tenantId, "index.json");
+}
+
+export async function loadTenant(
+  tenantId: string,
+  tenantsDir = TENANTS_DIR,
+): Promise<{ config: TenantConfig; docs: SourceDocument[] }> {
+  assertValidTenantId(tenantId);
+  const dir = join(tenantsDir, tenantId);
+  const config = JSON.parse(await readFile(join(dir, "tenant.json"), "utf8")) as TenantConfig;
+  if (config.id !== tenantId) {
+    throw new Error(`tenant.json id "${config.id}" does not match folder "${tenantId}"`);
+  }
+
+  const docsDir = join(dir, "docs");
+  const files = (await readdir(docsDir))
+    .filter((f) => SUPPORTED_EXTENSIONS.some((ext) => f.toLowerCase().endsWith(ext)))
+    .sort();
+
+  const docs = await Promise.all(
+    files.map(async (file) => ({ docId: file, text: await readFile(join(docsDir, file), "utf8") })),
+  );
+  return { config, docs };
+}
