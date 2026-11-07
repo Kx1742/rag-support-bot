@@ -1,5 +1,13 @@
 import { unwrapLines } from "../text.ts";
-import type { ChatMessage, ChatProvider, EmbeddingProvider, ScoredChunk, TenantConfig } from "../types.ts";
+import type {
+  ChatMessage,
+  ChatProvider,
+  EmbeddingProvider,
+  ScoredChunk,
+  TenantConfig,
+  ToolCallRecord,
+  ToolRunner,
+} from "../types.ts";
 import { buildSystemPrompt, fallbackAnswer } from "./prompt.ts";
 import type { VectorStore } from "./vectorStore.ts";
 
@@ -30,7 +38,18 @@ export interface Answer {
 export type AnswerEvent =
   | { type: "sources"; sources: SourceRef[] }
   | { type: "delta"; text: string }
+  /** Something happened through a tool, e.g. a booking was made. The UI can show a card. */
+  | { type: "action"; name: string; data: unknown }
   | { type: "done"; usedFallback: boolean };
+
+/** Optional actions (like bookings) the assistant can take through function calling. */
+export interface AssistantTools {
+  /** Extra system-prompt text, e.g. today's date and booking rules. Called per question. */
+  instructions(): string;
+  runner: ToolRunner;
+  /** Turns a finished tool call into a UI event, or null to show nothing. */
+  toAction?(call: ToolCallRecord): { name: string; data: unknown } | null;
+}
 
 /**
  * The channel-independent "brain". Web chat, WhatsApp, etc. all call ask() or askStream().
@@ -41,6 +60,7 @@ export class Assistant {
   private readonly embedder: EmbeddingProvider;
   private readonly chat: ChatProvider;
   private readonly options: Required<AssistantOptions>;
+  private readonly tools?: AssistantTools;
 
   constructor(deps: {
     tenant: TenantConfig;
@@ -48,12 +68,20 @@ export class Assistant {
     embedder: EmbeddingProvider;
     chat: ChatProvider;
     options?: AssistantOptions;
+    tools?: AssistantTools;
   }) {
     this.tenant = deps.tenant;
     this.store = deps.store;
     this.embedder = deps.embedder;
     this.chat = deps.chat;
     this.options = { topK: 4, minScore: 0.5, historyLimit: 6, ...deps.options };
+    // Tools only work with a model that supports function calling.
+    this.tools = deps.chat.chatWithTools ? deps.tools : undefined;
+  }
+
+  /** True when the assistant can take actions such as bookings. */
+  get canUseTools(): boolean {
+    return !!this.tools;
   }
 
   async ask(question: string, history: ChatMessage[] = []): Promise<Answer> {
@@ -63,7 +91,7 @@ export class Assistant {
     for await (const event of this.askStream(question, history)) {
       if (event.type === "sources") sources = event.sources;
       else if (event.type === "delta") text += event.text;
-      else usedFallback = event.usedFallback;
+      else if (event.type === "done") usedFallback = event.usedFallback;
     }
     return { text: text.trim(), sources, usedFallback };
   }
@@ -78,16 +106,30 @@ export class Assistant {
     const sources = found.map(toSourceRef);
     yield { type: "sources", sources };
 
+    const messages = [...recent, { role: "user" as const, text: trimmed }];
+
+    if (this.tools) {
+      // With tools the model must always run: "table for 4 on Saturday" matches no FAQ text.
+      const { text, calls } = await this.chat.chatWithTools!(
+        { system: buildSystemPrompt(this.tenant, found, this.tools.instructions()), messages },
+        this.tools.runner,
+      );
+      for (const call of calls) {
+        const action = this.tools.toAction?.(call);
+        if (action) yield { type: "action", ...action };
+      }
+      yield { type: "delta", text };
+      yield { type: "done", usedFallback: false };
+      return;
+    }
+
     if (found.length === 0) {
       yield { type: "delta", text: fallbackAnswer(this.tenant) };
       yield { type: "done", usedFallback: true };
       return;
     }
 
-    const request = {
-      system: buildSystemPrompt(this.tenant, found),
-      messages: [...recent, { role: "user" as const, text: trimmed }],
-    };
+    const request = { system: buildSystemPrompt(this.tenant, found), messages };
     if (this.chat.stream) {
       for await (const text of this.chat.stream(request)) yield { type: "delta", text };
     } else {

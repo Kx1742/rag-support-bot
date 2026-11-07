@@ -1,77 +1,105 @@
-# RAG Support Bot
+# RAG Support Bot + Shop Desk
 
 [![CI](https://github.com/Kx1742/rag-support-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Kx1742/rag-support-bot/actions/workflows/ci.yml)
 
-A customer-support chatbot that answers questions **from a business's own documents**
-(menu, hours, policies, FAQs) using Retrieval-Augmented Generation and Google Gemini.
-It streams answers into a web chat, cites its sources, and says "I don't know" instead
-of inventing answers.
+A customer-support chatbot for small businesses that **answers questions from the business's own
+documents** and **books tables by chatting**, plus a **staff desk** with a till (POS), a kitchen
+order queue, a bookings list and menu controls, all updating live.
 
-It's built to support many businesses: each one is a **tenant** with its own documents,
-branding and settings. Adding a new business means adding a folder, not changing code.
+- **Customers** chat on the website: "Do you have oat milk?", "Table for 4 on Saturday at 10?"
+- **The AI** (Google Gemini) answers from the café's documents with citations, and checks availability
+  and makes bookings through function calling, using the shop's real booking rules
+- **Staff** see new bookings appear instantly on the desk, ring up orders at the till, and move
+  orders through New → Preparing → Ready
 
-> The demo business, **Bean & Byte Café**, is fictional. Its documents are made up for this project.
+It's multi-tenant: each business is a folder with its own documents, menu, tables and opening hours.
 
-<!-- TODO: add a screenshot or GIF of the chat here -->
+> The demo business, **Bean & Byte Café**, is fictional. Its documents and menu are made up for this project.
+
+<!-- TODO: add screenshots or a GIF of the chat and the desk here -->
 
 ## Features
 
-- **Grounded answers with citations**: every fact links to the document it came from, and you can click a citation to see the source text
-- **Streaming responses** over Server-Sent Events
-- **Follow-up questions**: "and on Sunday?" understands the earlier question
-- **Multi-tenant**: per-business documents, assistant name, tone, brand color and suggested questions
-- **Abuse protection**: per-visitor rate limiting, a daily message cap, input validation and size limits
-- **Offline mode**: runs with no API key using local keyword search, for development and demos
-- **Secure by default**: API key stays on the server, strict Content-Security-Policy, no `innerHTML`
-- Light/dark mode, works on phones, no frontend framework or build step
+**Customer chat** (`/`)
+- Grounded answers with clickable citations, streamed over Server-Sent Events
+- **Books and cancels tables in conversation** (Gemini function calling), always confirming first
+- "Book a table" form in the chat, which also works without AI
+- Follow-up questions, suggested questions, business branding, dark mode, works on phones
+
+**Staff desk** (`/desk`, password protected)
+- **Till / POS**: menu grid by category, ticket with quantities, takeaway or dine-in by table
+- **Order queue**: New → Preparing → Ready → Picked up, with today's sales summary
+- **Bookings**: day view, seat, finish, no-show and cancel, plus phone and walk-in bookings with table choice
+- **Menu**: mark items sold out; the till greys them out immediately
+- **Live updates**: new bookings (on any date) and orders appear on every open desk screen instantly
+- Payments are deliberately not handled yet (see roadmap)
+
+**Engineering**
+- Zero runtime dependencies: Node's built-in `node:http`, `node:sqlite` and `fetch`
+- Booking rules enforced server-side: opening hours, slot grid, notice period, table sizes,
+  overlap checks, per-phone limits
+- Prices always come from the database, never from the browser
+- Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
+- 78 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    subgraph Ingest["Ingest (when docs change)"]
-        D[tenants/&lt;id&gt;/docs/*.md] --> C[Chunk by heading]
-        C --> E1[Embed]
-        E1 --> I[(data/&lt;id&gt;/index.json)]
+    C[Customer chat page]
+    D[Staff desk: till, orders, bookings, menu]
+    subgraph Server["Node server"]
+        API[HTTP API + rate limits]
+        A[Assistant]
+        R[RAG: chunk, embed, search]
+        T[Booking tools]
+        S[(Shop: SQLite per business)]
+        E[Live events]
     end
-    subgraph Ask["Each question"]
-        B[Browser chat] -->|POST /api/tenants/:id/chat| R[Rate limit + validate]
-        R --> E2[Embed question]
-        E2 --> S[Cosine search top-k]
-        I --> S
-        S -->|nothing relevant| F[Fallback: contact info]
-        S -->|relevant chunks| P[Prompt with numbered sources]
-        P --> G[Gemini streams answer]
-        G -->|SSE| B
-        F -->|SSE| B
-    end
+    G[Gemini API]
+
+    C -->|chat over SSE, booking form| API
+    D -->|login cookie| API
+    API --> A
+    API --> S
+    A --> R
+    A <-->|function calling| G
+    A --> T --> S
+    S --> E -->|SSE| D
 ```
 
-1. **Chunking**: documents are split by Markdown headings so each chunk covers one topic.
-   Each chunk keeps its heading path (`Refund Policy > Gift Cards`) for better retrieval.
-2. **Embedding and indexing**: chunks are embedded with `gemini-embedding-001` (768 dimensions)
-   and saved as JSON. A content hash skips re-embedding when nothing changed.
-3. **Retrieval**: the question is searched on its own **and** together with the previous
-   question, keeping each chunk's best score. This handles follow-ups without letting an
-   unrelated earlier question drown out a new topic.
-4. **Grounded answer**: if nothing scores above the threshold, the bot returns the business's
-   contact details **without calling the LLM**. This saves quota and prevents made-up answers.
-   Otherwise Gemini answers using only the numbered sources and cites them.
-5. **Streaming**: the server sends `sources`, then `delta` pieces, then `done` as Server-Sent
-   Events. The UI only lists sources the answer actually cites.
+### Answering questions (RAG)
+1. Documents are split by Markdown heading into chunks, embedded with `gemini-embedding-001`, and saved.
+2. Each question is searched on its own **and** with the previous question (for follow-ups),
+   keeping each chunk's best score.
+3. Gemini answers using only the numbered sources and cites them. With no relevant sources
+   and no tools, the bot gives the contact details instead of guessing.
+
+### Booking by chat (function calling)
+1. The system prompt gives Gemini today's date, a 14-day calendar (models are bad at date maths)
+   and the booking rules.
+2. Gemini calls `check_availability`. Our code runs the real rules and returns free times or the
+   closest alternatives.
+3. Gemini summarises the details and asks the customer to confirm. Only after a clear "yes" does
+   it call `create_booking`.
+4. The chat shows a confirmation card with the reference, and the desk announces the new booking live.
+
+Rule violations ("we seat up to 6") are returned to the model as tool results so it can explain
+them. Unexpected errors are not.
 
 ## Design decisions
 
 | Decision | Why |
 |---|---|
-| Channel-independent `Assistant` class | Web chat, WhatsApp, etc. are thin adapters over the same core. |
-| `EmbeddingProvider` / `ChatProvider` interfaces | Swap Gemini for another model, run offline, and use fakes in tests. |
-| Plain REST + `node:http`, zero runtime dependencies | Small attack surface, nothing to keep patched, and easy to read. |
-| Brute-force vector search | Simple and fast for a few thousand chunks per business. pgvector is the upgrade path. |
-| Documents marked as data in the prompt | Basic defence against prompt injection hidden in uploaded docs. |
-| Token-bucket rate limit + daily cap | A public demo can't burn through the free API quota. |
-| Allow-listed static files, validated tenant ids | No path tricks (`../`) can reach other files. |
-| Internal errors logged, generic message to the browser | Upstream error details never leak to visitors. |
+| Channel-independent `Assistant` with pluggable tools | Web chat today, WhatsApp next, same brain. |
+| `node:sqlite`, one database file per business | Real transactions with zero dependencies, and tenants can't see each other's data. |
+| Times stored as shop wall-clock values (`2026-11-14`, minute 600) | Only "now" needs a timezone conversion, which avoids most daylight-saving bugs. |
+| Smallest free table that fits | Keeps big tables free for big groups. |
+| Customer cancel needs reference **and** phone, same error for both | References can't be guessed or probed. |
+| HttpOnly + SameSite=Strict session cookie, JSON-only writes | Blocks cross-site request forgery without CSRF tokens. |
+| Constant-time password check, login rate limit | No timing leaks or brute force. |
+| Server-Sent Events for the desk | Simple one-way live updates over plain HTTP. |
+| Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
 ## Getting started
 
@@ -79,23 +107,23 @@ Requires **Node.js 23.6+**, which runs TypeScript directly with no build step.
 
 ```bash
 npm install
-npm start                     # open http://localhost:3000
-```
-
-With no API key this runs in **offline mode** (keyword search, shows the matching text).
-For real AI answers, get a free key at https://aistudio.google.com/apikey, then:
-
-```bash
-cp .env.example .env          # paste your key into GEMINI_API_KEY
+cp .env.example .env    # set STAFF_PASSWORD (8+ chars); add GEMINI_API_KEY for AI answers
 npm start
 ```
+
+- Customer chat: http://localhost:3000
+- Staff desk: http://localhost:3000/desk (business ID `bean-and-byte`, password from `.env`)
+
+Without `GEMINI_API_KEY` the chat runs in **offline mode**: keyword search, no AI-written answers,
+and bookings through the form only. Get a free key at https://aistudio.google.com/apikey.
 
 Other commands:
 
 ```bash
-npm run dev                   # restart the server when files change
+npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm run ingest -- bean-and-byte --force
+npm test                      # 78 tests
+npm run typecheck
 ```
 
 ### Add your own business
@@ -103,44 +131,44 @@ npm run ingest -- bean-and-byte --force
 ```text
 tenants/
   my-shop/
-    tenant.json      # name, assistant name, tone, fallback contact, brand color, suggested questions
-    docs/
-      faq.md
-      prices.md
+    tenant.json   # name, assistant name, tone, contact, brand color, suggested questions
+    shop.json     # optional: timezone, opening hours, tables, booking rules, menu with prices
+    docs/*.md     # FAQs, policies, menu text for the chatbot
 ```
 
-Open `http://localhost:3000/?tenant=my-shop`. The index is built automatically on the first question.
+Without `shop.json` the business gets the chatbot only. Data is stored in `data/<id>/` (git-ignored).
 
 ### API
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/tenants/:id` | Public business info (name, brand color, suggested questions) |
-| `POST` | `/api/tenants/:id/chat` | Body `{ "message": "...", "history": [{ "role": "user", "text": "..." }] }`. Responds with a Server-Sent Events stream. |
-| `GET` | `/api/health` | Health check |
-
-## Tests
-
-```bash
-npm test          # 41 tests, run offline: fake embeddings, fake HTTP, real server on a random port
-npm run typecheck
-```
+| `GET` | `/api/tenants/:id` | Public business info |
+| `POST` | `/api/tenants/:id/chat` | Chat. Body `{ message, history }`; responds with an SSE stream (`sources`, `action`, `delta`, `done`) |
+| `GET` | `/api/tenants/:id/availability?date=&partySize=` | Free booking times |
+| `POST` | `/api/tenants/:id/bookings` | Book a table: `{ date, time, partySize, name, phone, notes? }` |
+| `POST` | `/api/desk/login`, `/api/desk/logout` | Staff session (cookie) |
+| `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue |
+| `GET`, `POST`, `PATCH` | `/api/desk/bookings`, `/api/desk/bookings/:id` | Bookings by day, status changes |
+| `GET`, `PATCH` | `/api/desk/menu`, `/api/desk/menu/:id` | Menu and sold-out flags |
+| `GET` | `/api/desk/events` | Live change events (SSE) |
 
 ## Roadmap
 
-- [x] RAG engine: chunking, embeddings, retrieval, grounded answers with citations
-- [x] Multi-tenant document folders
-- [x] Web chat UI with streaming responses
-- [x] HTTP API with rate limiting (keeps the API key on the server)
+- [x] RAG engine with citations, multi-tenant
+- [x] Streaming web chat, rate-limited API, offline mode
+- [x] Table bookings: rules engine, chat booking via function calling, booking form
+- [x] Staff desk: till, order queue, bookings, menu, live updates
+- [ ] Payments at the till (Stripe test mode first)
+- [ ] Per-staff accounts and roles instead of one shared password
 - [ ] Deploy a live demo
-- [ ] Upload your own documents (PDF/TXT)
-- [ ] WhatsApp channel via the WhatsApp Business Cloud API
-- [ ] Admin dashboard: unanswered questions, so businesses know which docs to add
+- [ ] Booking confirmations by SMS/email; WhatsApp channel
+- [ ] Customers order ahead through the chat
 
 ## Privacy note
 
-On Gemini's free tier, Google may use prompts to improve its products. Don't upload
-sensitive or real customer data to the demo. For real businesses, use the paid tier.
+Bookings store a name and phone number in the business's local database. On Gemini's free tier,
+Google may use prompts to improve its products, so don't use real customer data with the demo.
+Use the paid tier for real businesses.
 
 ## License
 

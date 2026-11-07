@@ -1,0 +1,54 @@
+{
+  "timezone": "America/New_York",
+  "currency": "USD",
+  "referencePrefix": "BB",
+  "openingHours": {
+    "mon": ["07:00", "18:00"],
+    "tue": ["07:00", "18:00"],
+    "wed": ["07:00", "18:00"],
+    "thu": ["07:00", "18:00"],
+    "fri": ["07:00", "18:00"],
+    "sat": ["08:00", "17:00"],
+    "sun": ["09:00", "15:00"]
+  },
+  "closedDates": ["2026-12-25", "2027-01-01"],
+  "booking": {
+    "durationMinutes": 90,
+    "slotMinutes": 30,
+    "minNoticeMinutes": 60,
+    "maxDaysAhead": 30,
+    "maxActivePerPhone": 2
+  },
+  "tables": [
+    { "id": "T1", "name": "Table 1", "seats": 2 },
+    { "id": "T2", "name": "Table 2", "seats": 2 },
+    { "id": "T3", "name": "Window 3", "seats": 2 },
+    { "id": "T4", "name": "Table 4", "seats": 4 },
+    { "id": "T5", "name": "Table 5", "seats": 4 },
+    { "id": "T6", "name": "Big Table 6", "seats": 6 }
+  ],
+  "menu": [
+    { "id": "espresso", "name": "Espresso", "category": "Coffee", "price": 300 },
+    { "id": "americano", "name": "Americano", "category": "Coffee", "price": 350 },
+    { "id": "flat-white", "name": "Flat White", "category": "Coffee", "price": 450 },
+    { "id": "cappuccino", "name": "Cappuccino", "category": "Coffee", "price": 450 },
+    { "id": "latte", "name": "Caffè Latte", "category": "Coffee", "price": 475 },
+    { "id": "mocha", "name": "Mocha", "category": "Coffee", "price": 525 },
+    { "id": "cold-brew", "name": "Cold Brew", "category": "Coffee", "price": 475 },
+    { "id": "matcha", "name": "Matcha Latte", "category": "Not Coffee", "price": 500 },
+    { "id": "chai", "name": "Chai Latte", "category": "Not Coffee", "price": 475 },
+    { "id": "hot-choc", "name": "Hot Chocolate", "category": "Not Coffee", "price": 400 },
+    { "id": "oj", "name": "Fresh Orange Juice", "category": "Not Coffee", "price": 450 },
+    { "id": "croissant", "name": "Butter Croissant", "category": "Food", "price": 350 },
+    { "id": "almond-croissant", "name": "Almond Croissant", "category": "Food", "price": 425 },
+    { "id": "avo-toast", "name": "Avocado Toast", "category": "Food", "price": 950 },
+    { "id": "bagel", "name": "Breakfast Bagel", "category": "Food", "price": 800 },
+    { "id": "panini", "name": "Chicken Pesto Panini", "category": "Food", "price": 1100 },
+    { "id": "banana-bread", "name": "Banana Bread", "category": "Food", "price": 375 },
+    { "id": "brownie", "name": "Gluten-free Brownie", "category": "Food", "price": 400 },
+    { "id": "oat-milk", "name": "Oat milk", "category": "Extras", "price": 60 },
+    { "id": "almond-milk", "name": "Almond milk", "category": "Extras", "price": 60 },
+    { "id": "soy-milk", "name": "Soy milk", "category": "Extras", "price": 60 },
+    { "id": "extra-shot", "name": "Extra shot", "category": "Extras", "price": 80 }
+  ]
+}

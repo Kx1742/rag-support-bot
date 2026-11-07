@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shop Desk</title>
+    <link rel="stylesheet" href="/desk.css" />
+    <script src="/desk.js" defer></script>
+  </head>
+  <body>
+    <!-- Login -->
+    <main class="login" id="login-view" hidden>
+      <form class="card login-card" id="login-form">
+        <h1>Shop desk</h1>
+        <p class="muted">Staff only. Log in to manage orders and bookings.</p>
+        <label>Business ID <input id="login-tenant" autocomplete="organization" required /></label>
+        <label>Password <input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <p class="error" id="login-error" role="alert"></p>
+        <button class="primary" type="submit">Log in</button>
+      </form>
+    </main>
+
+    <!-- Desk -->
+    <div class="desk" id="desk-view" hidden>
+      <header class="topbar">
+        <strong class="brand" id="desk-title">Shop desk</strong>
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="till" aria-selected="true">Till</button>
+          <button role="tab" data-tab="orders">Orders <span class="count" id="orders-count" hidden></span></button>
+          <button role="tab" data-tab="bookings">Bookings</button>
+          <button role="tab" data-tab="menu">Menu</button>
+        </nav>
+        <span class="live" id="live" title="Live updates">● Live</span>
+        <button class="ghost" id="logout" type="button">Log out</button>
+      </header>
+
+      <!-- Till -->
+      <section class="tab-panel till" data-panel="till">
+        <div class="till-menu">
+          <div class="pills" id="category-pills"></div>
+          <div class="item-grid" id="item-grid"></div>
+        </div>
+        <aside class="ticket card">
+          <h2>New order</h2>
+          <div class="segmented" id="order-type">
+            <button type="button" data-type="takeaway" aria-pressed="true">Takeaway</button>
+            <button type="button" data-type="dine_in" aria-pressed="false">Dine in</button>
+          </div>
+          <label id="table-field" hidden>Table <select id="order-table"></select></label>
+          <label>Customer name <input id="order-name" maxlength="60" placeholder="Optional" /></label>
+          <ul class="ticket-lines" id="ticket-lines"></ul>
+          <p class="muted empty-ticket" id="empty-ticket">Tap items to add them.</p>
+          <label>Notes <input id="order-notes" maxlength="300" placeholder="e.g. extra hot" /></label>
+          <div class="ticket-total"><span>Total</span><strong id="ticket-total">$0.00</strong></div>
+          <p class="error" id="ticket-error" role="alert"></p>
+          <button class="primary" id="send-order" type="button" disabled>Send to kitchen</button>
+          <button class="ghost small" id="clear-ticket" type="button">Clear</button>
+          <p class="muted tiny">Payments aren't handled yet. Take payment at the counter.</p>
+        </aside>
+      </section>
+
+      <!-- Orders -->
+      <section class="tab-panel" data-panel="orders" hidden>
+        <div class="stats" id="order-stats"></div>
+        <div class="board">
+          <div class="column"><h3>New</h3><div id="col-new"></div></div>
+          <div class="column"><h3>Preparing</h3><div id="col-preparing"></div></div>
+          <div class="column"><h3>Ready</h3><div id="col-ready"></div></div>
+        </div>
+        <details class="done-orders">
+          <summary id="done-summary">Completed &amp; cancelled</summary>
+          <div id="col-done"></div>
+        </details>
+      </section>
+
+      <!-- Bookings -->
+      <section class="tab-panel" data-panel="bookings" hidden>
+        <div class="toolbar">
+          <button class="ghost" id="prev-day" type="button" aria-label="Previous day">‹</button>
+          <input type="date" id="booking-date" />
+          <button class="ghost" id="next-day" type="button" aria-label="Next day">›</button>
+          <button class="ghost" id="today-btn" type="button">Today</button>
+          <span class="muted" id="booking-stats"></span>
+          <button class="primary" id="new-booking-btn" type="button">+ New booking</button>
+        </div>
+
+        <form class="card booking-form" id="booking-form" hidden>
+          <h3>New booking</h3>
+          <div class="form-grid">
+            <label>Date <input type="date" id="nb-date" required /></label>
+            <label>People <input type="number" id="nb-party" min="1" value="2" required /></label>
+            <label>Table <select id="nb-table"><option value="">Any free table</option></select></label>
+            <label>Name <input id="nb-name" maxlength="80" required /></label>
+            <label>Phone <input id="nb-phone" type="tel" placeholder="Optional for walk-ins" /></label>
+            <label>Notes <input id="nb-notes" maxlength="300" /></label>
+          </div>
+          <p class="muted small">Pick a time:</p>
+          <div class="time-slots" id="nb-times"></div>
+          <p class="error" id="nb-error" role="alert"></p>
+          <div class="form-actions">
+            <button class="ghost" type="button" id="nb-cancel">Close</button>
+            <button class="primary" type="submit" id="nb-submit" disabled>Create booking</button>
+          </div>
+        </form>
+
+        <div class="booking-list" id="booking-list"></div>
+      </section>
+
+      <!-- Menu -->
+      <section class="tab-panel" data-panel="menu" hidden>
+        <p class="muted">Mark items as sold out. Sold-out items can't be added to orders.</p>
+        <div class="menu-admin" id="menu-admin"></div>
+      </section>
+    </div>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+  </body>
+</html>

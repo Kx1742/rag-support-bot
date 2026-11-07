@@ -2,22 +2,41 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Assistant } from "../rag/assistant.ts";
+import type { Shop } from "../shop/shop.ts";
+import { isDate } from "../shop/time.ts";
 import type { TenantConfig } from "../types.ts";
-import type { DailyCap, RateLimiter } from "./rateLimit.ts";
-import { LIMITS, parseChatBody, ValidationError } from "./validate.ts";
+import type { StaffAuth } from "./auth.ts";
+import { handleDesk } from "./desk.ts";
+import {
+  clientIp,
+  HttpError,
+  readObject,
+  SECURITY_HEADERS,
+  sendJson,
+  sendSse,
+  startSse,
+  statusFor,
+} from "./httpUtil.ts";
+import { DailyCap, RateLimiter } from "./rateLimit.ts";
+import { parseChatBody } from "./validate.ts";
 
 /** The part of Assistant the server needs (makes it easy to fake in tests). */
-export type ChatAssistant = Pick<Assistant, "tenant" | "askStream">;
+export type ChatAssistant = Pick<Assistant, "tenant" | "askStream"> & { canUseTools?: boolean };
 
 export interface ServerDeps {
   /** Returns null when the tenant doesn't exist. */
   getAssistant(tenantId: string): Promise<ChatAssistant | null>;
+  /** Returns null when the tenant has no shop (bookings/till) features. */
+  getShop?(tenantId: string): Promise<Shop | null>;
+  staffAuth?: StaffAuth;
   publicDir: string;
   defaultTenant: string;
   limiter: RateLimiter;
   dailyCap: DailyCap;
+  loginLimiter?: RateLimiter;
   /** Read the client IP from X-Forwarded-For (only behind a trusted proxy). */
   trustProxy?: boolean;
+  secureCookies?: boolean;
   mode?: string;
   log?: (message: string) => void;
 }
@@ -27,22 +46,10 @@ const STATIC_FILES: Record<string, { file: string; type: string }> = {
   "/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
   "/styles.css": { file: "styles.css", type: "text/css; charset=utf-8" },
+  "/desk": { file: "desk.html", type: "text/html; charset=utf-8" },
+  "/desk.js": { file: "desk.js", type: "text/javascript; charset=utf-8" },
+  "/desk.css": { file: "desk.css", type: "text/css; charset=utf-8" },
 };
-
-const SECURITY_HEADERS = {
-  "Content-Security-Policy":
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-};
-
-class HttpError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
 
 export function createAppServer(deps: ServerDeps): Server {
   const log = deps.log ?? ((m: string) => console.log(m));
@@ -51,7 +58,7 @@ export function createAppServer(deps: ServerDeps): Server {
     try {
       await route(req, res, deps);
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : err instanceof ValidationError ? 400 : 500;
+      const status = statusFor(err);
       if (status === 500) log(`Error on ${req.method} ${req.url}: ${(err as Error).stack ?? err}`);
       if (res.headersSent) {
         res.end();
@@ -65,6 +72,7 @@ export function createAppServer(deps: ServerDeps): Server {
 async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
+  const getShop = deps.getShop ?? (async () => null);
 
   if (req.method === "GET" && STATIC_FILES[path]) {
     const { file, type } = STATIC_FILES[path];
@@ -84,17 +92,58 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     return;
   }
 
-  const tenantMatch = /^\/api\/tenants\/([^/]+)(\/chat)?$/.exec(path);
-  if (tenantMatch) {
-    const assistant = await deps.getAssistant(decodeURIComponent(tenantMatch[1]));
-    if (!assistant) throw new HttpError(404, "Business not found");
+  if (deps.staffAuth && deps.loginLimiter) {
+    const handled = await handleDesk(req, res, url, {
+      getShop,
+      staffAuth: deps.staffAuth,
+      loginLimiter: deps.loginLimiter,
+      trustProxy: deps.trustProxy,
+      secureCookies: deps.secureCookies,
+    });
+    if (handled) return;
+  }
 
-    if (!tenantMatch[2] && req.method === "GET") {
-      sendJson(res, 200, publicTenantInfo(assistant.tenant));
+  const tenantMatch = /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings))?$/.exec(path);
+  if (tenantMatch) {
+    const tenantId = decodeURIComponent(tenantMatch[1]);
+    const assistant = await deps.getAssistant(tenantId);
+    if (!assistant) throw new HttpError(404, "Business not found");
+    const action = tenantMatch[2];
+
+    if (!action && req.method === "GET") {
+      sendJson(res, 200, publicTenantInfo(assistant.tenant, await getShop(tenantId), !!assistant.canUseTools));
       return;
     }
-    if (tenantMatch[2] && req.method === "POST") {
+    if (action === "chat" && req.method === "POST") {
       await handleChat(req, res, assistant, deps);
+      return;
+    }
+
+    const shop = await getShop(tenantId);
+    if (!shop) throw new HttpError(404, "This business doesn't take bookings online");
+
+    if (action === "availability" && req.method === "GET") {
+      const date = url.searchParams.get("date") ?? "";
+      if (!isDate(date)) throw new HttpError(400, "date must be YYYY-MM-DD");
+      const partySize = Number(url.searchParams.get("partySize") ?? 2);
+      sendJson(res, 200, { date, partySize, ...shop.bookings.availableTimes(date, partySize) });
+      return;
+    }
+    if (action === "bookings" && req.method === "POST") {
+      takeRateLimit(req, res, deps);
+      const b = await readObject(req);
+      const booking = shop.bookings.create(
+        {
+          date: String(b.date ?? ""),
+          time: String(b.time ?? ""),
+          partySize: Number(b.partySize),
+          name: String(b.name ?? ""),
+          phone: String(b.phone ?? ""),
+          notes: String(b.notes ?? ""),
+        },
+        "web",
+      );
+      sendJson(res, 201, { booking: shop.bookings.toPublic(booking) });
       return;
     }
     throw new HttpError(405, "Method not allowed");
@@ -103,84 +152,56 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
   throw new HttpError(404, "Not found");
 }
 
-async function handleChat(req: IncomingMessage, res: ServerResponse, assistant: ChatAssistant, deps: ServerDeps) {
+function takeRateLimit(req: IncomingMessage, res: ServerResponse, deps: ServerDeps): void {
   const limit = deps.limiter.take(clientIp(req, deps.trustProxy));
   if (!limit.allowed) {
     res.setHeader("Retry-After", String(limit.retryAfterSec));
     throw new HttpError(429, `Too many messages. Please wait ${limit.retryAfterSec} seconds.`);
   }
+}
 
-  const { message, history } = parseChatBody(await readJson(req));
+async function handleChat(req: IncomingMessage, res: ServerResponse, assistant: ChatAssistant, deps: ServerDeps) {
+  takeRateLimit(req, res, deps);
+  const { message, history } = parseChatBody(await readObject(req));
   if (!deps.dailyCap.take()) {
     throw new HttpError(503, "The demo has reached its daily message limit. Please try again tomorrow.");
   }
 
-  res.writeHead(200, {
-    ...SECURITY_HEADERS,
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-  });
-
+  startSse(res);
   let closed = false;
   res.on("close", () => (closed = true));
 
   try {
     for await (const event of assistant.askStream(message, history)) {
       if (closed) break; // visitor left: stop sending
-      res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      sendSse(res, event.type, event);
     }
   } catch (err) {
     (deps.log ?? console.log)(`Chat error for ${assistant.tenant.id}: ${(err as Error).message}`);
     if (!closed) {
-      const error = "Sorry, the assistant is having trouble right now. Please try again.";
-      res.write(`event: error\ndata: ${JSON.stringify({ type: "error", error })}\n\n`);
+      sendSse(res, "error", { type: "error", error: "Sorry, the assistant is having trouble right now. Please try again." });
     }
   }
   res.end();
 }
 
 /** Only the fields the browser needs (no internal settings). */
-export function publicTenantInfo(t: TenantConfig) {
+export function publicTenantInfo(t: TenantConfig, shop: Shop | null = null, canUseTools = false) {
   return {
     id: t.id,
     name: t.name,
     assistantName: t.assistantName,
     fictional: !!t.fictional,
     suggestedQuestions: (t.suggestedQuestions ?? []).slice(0, 6),
+    /** True when the chat assistant itself can make and cancel bookings. */
+    chatBookings: !!shop && canUseTools,
     brandColor: t.brandColor && /^#[0-9a-f]{6}$/i.test(t.brandColor) ? t.brandColor : null,
+    booking: shop
+      ? {
+          today: shop.bookings.today().date,
+          maxPartySize: shop.bookings.maxPartySize,
+          maxDaysAhead: shop.config.booking.maxDaysAhead,
+        }
+      : null,
   };
-}
-
-function clientIp(req: IncomingMessage, trustProxy = false): string {
-  if (trustProxy) {
-    const forwarded = req.headers["x-forwarded-for"];
-    const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return req.socket.remoteAddress ?? "unknown";
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  if (!String(req.headers["content-type"] ?? "").includes("application/json")) {
-    throw new HttpError(415, "Content-Type must be application/json");
-  }
-  let size = 0;
-  const parts: Buffer[] = [];
-  for await (const part of req) {
-    size += (part as Buffer).length;
-    if (size > LIMITS.bodyBytes) throw new HttpError(413, "Request body too large");
-    parts.push(part as Buffer);
-  }
-  try {
-    return JSON.parse(Buffer.concat(parts).toString("utf8"));
-  } catch {
-    throw new HttpError(400, "Invalid JSON");
-  }
-}
-
-function sendJson(res: ServerResponse, status: number, data: unknown): void {
-  res.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
 }

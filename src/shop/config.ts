@@ -1,0 +1,90 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { assertValidTenantId, TENANTS_DIR } from "../tenant.ts";
+import { isTime, toMinutes, WEEKDAYS, type Weekday } from "./time.ts";
+
+export interface TableConfig {
+  id: string;
+  name: string;
+  seats: number;
+}
+
+export interface MenuItemConfig {
+  id: string;
+  name: string;
+  category: string;
+  /** Price in cents. */
+  price: number;
+}
+
+export interface ShopConfig {
+  timezone: string;
+  currency: string;
+  /** Prefix for booking references, e.g. "BB" -> "BB-7K3QX". */
+  referencePrefix: string;
+  /** Missing day = closed. Times are "HH:MM" in the shop's timezone. */
+  openingHours: Partial<Record<Weekday, [string, string]>>;
+  closedDates: string[];
+  booking: {
+    durationMinutes: number;
+    slotMinutes: number;
+    minNoticeMinutes: number;
+    maxDaysAhead: number;
+    maxActivePerPhone: number;
+  };
+  tables: TableConfig[];
+  menu: MenuItemConfig[];
+}
+
+/** Loads tenants/<id>/shop.json. Returns null when the tenant has no shop features. */
+export async function loadShopConfig(tenantId: string, tenantsDir = TENANTS_DIR): Promise<ShopConfig | null> {
+  assertValidTenantId(tenantId);
+  let raw: string;
+  try {
+    raw = await readFile(join(tenantsDir, tenantId, "shop.json"), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  const config = JSON.parse(raw) as ShopConfig;
+  validateShopConfig(config);
+  return config;
+}
+
+/** Fails fast on config mistakes instead of producing odd bookings later. */
+export function validateShopConfig(c: ShopConfig): void {
+  const fail = (msg: string) => {
+    throw new Error(`Invalid shop.json: ${msg}`);
+  };
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: c.timezone });
+  } catch {
+    fail(`unknown timezone "${c.timezone}"`);
+  }
+  if (!/^[A-Z0-9]{1,6}$/.test(c.referencePrefix)) fail("referencePrefix must be 1-6 uppercase letters/digits");
+
+  for (const [day, hours] of Object.entries(c.openingHours)) {
+    if (!WEEKDAYS.includes(day as Weekday)) fail(`unknown weekday "${day}"`);
+    if (!hours || !isTime(hours[0]) || !isTime(hours[1]) || toMinutes(hours[0]) >= toMinutes(hours[1])) {
+      fail(`opening hours for ${day} must be ["HH:MM", "HH:MM"] with open before close`);
+    }
+  }
+  const b = c.booking;
+  for (const key of ["durationMinutes", "slotMinutes", "minNoticeMinutes", "maxDaysAhead", "maxActivePerPhone"] as const) {
+    if (!Number.isInteger(b[key]) || b[key] < 0) fail(`booking.${key} must be a non-negative integer`);
+  }
+  if (b.slotMinutes < 5 || b.durationMinutes < b.slotMinutes) fail("booking.slotMinutes/durationMinutes are too small");
+
+  const ids = new Set<string>();
+  for (const t of c.tables) {
+    if (!t.id || ids.has(t.id)) fail(`duplicate or missing table id "${t.id}"`);
+    if (!Number.isInteger(t.seats) || t.seats < 1) fail(`table ${t.id} needs seats >= 1`);
+    ids.add(t.id);
+  }
+  const itemIds = new Set<string>();
+  for (const m of c.menu) {
+    if (!/^[a-z0-9-]+$/.test(m.id) || itemIds.has(m.id)) fail(`duplicate or invalid menu id "${m.id}"`);
+    if (!Number.isInteger(m.price) || m.price < 0) fail(`menu item ${m.id} needs a price in cents`);
+    itemIds.add(m.id);
+  }
+}

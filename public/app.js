@@ -13,6 +13,7 @@ const els = {
 };
 
 let tenantId = "";
+let tenantInfo = null;
 let history = [];
 let busy = false;
 
@@ -31,6 +32,11 @@ async function init() {
   $("fictional-badge").hidden = !tenant.fictional;
   $("mode-badge").hidden = config.mode !== "offline";
   if (tenant.brandColor) document.documentElement.style.setProperty("--brand", tenant.brandColor);
+  tenantInfo = tenant;
+  if (tenant.booking) {
+    $("book-btn").hidden = false;
+    $("book-btn").addEventListener("click", openBookingCard);
+  }
 
   for (const question of tenant.suggestedQuestions) {
     const button = document.createElement("button");
@@ -93,7 +99,8 @@ async function sendMessage(raw) {
     }
 
     for await (const { event, data } of readSse(res.body)) {
-      if (event === "sources") sources = data.sources;
+      if (event === "action") showAction(data);
+      else if (event === "sources") sources = data.sources;
       else if (event === "delta") {
         answer += data.text;
         renderAnswer(bot.body, answer, sources);
@@ -264,6 +271,159 @@ function flashSource(msg, n) {
   item.scrollIntoView({ block: "nearest", behavior: "smooth" });
   item.classList.add("flash");
   setTimeout(() => item.classList.remove("flash"), 1200);
+}
+
+// ---------- Bookings ----------
+
+/** Small DOM builder: el("div", { class: "x" }, "text", child) */
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === undefined || value === null || value === false) continue;
+    if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else if (key === "class") node.className = value;
+    else node.setAttribute(key, value === true ? "" : String(value));
+  }
+  node.append(...children.filter((c) => c !== null && c !== undefined && c !== false));
+  return node;
+}
+
+/** Shows a card for things the assistant did through its tools. */
+function showAction(action) {
+  if (action.name === "booking_created") addBookingConfirmation(action.data);
+  if (action.name === "booking_cancelled") {
+    const b = action.data;
+    addCard(el("div", { class: "booking-card cancelled" }, el("strong", {}, "Booking cancelled"), el("div", {}, `${b.reference} · ${b.dateText} at ${b.time}`)));
+  }
+}
+
+function addCard(node) {
+  els.welcome.hidden = true;
+  els.messages.append(node);
+  scrollToBottom();
+}
+
+function addBookingConfirmation(b) {
+  addCard(
+    el(
+      "div",
+      { class: "booking-card confirmed" },
+      el("strong", {}, "✓ Table booked"),
+      el("div", { class: "ref" }, b.reference),
+      el("div", {}, `${b.dateText} at ${b.time}`),
+      el("div", {}, `${b.partySize} ${b.partySize === 1 ? "person" : "people"} · ${b.name}`),
+      el(
+        "div",
+        { class: "hint" },
+        tenantInfo?.chatBookings
+          ? "Keep your reference. To cancel, tell me the reference and your phone number."
+          : "Keep your reference. To cancel, contact the café with your reference.",
+      ),
+    ),
+  );
+}
+
+function openBookingCard() {
+  const info = tenantInfo.booking;
+  const maxDate = shiftDate(info.today, info.maxDaysAhead);
+  let chosenTime = null;
+
+  const date = el("input", { type: "date", min: info.today, max: maxDate, value: info.today, required: true });
+  const party = el(
+    "select",
+    {},
+    ...Array.from({ length: info.maxPartySize }, (_, i) => el("option", { value: String(i + 1), selected: i === 1 }, `${i + 1} ${i ? "people" : "person"}`)),
+  );
+  const times = el("div", { class: "times" });
+  const name = el("input", { maxlength: "80", autocomplete: "name", required: true });
+  const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
+  const notes = el("input", { maxlength: "300", placeholder: "Optional, e.g. high chair" });
+  const error = el("p", { class: "form-error", role: "alert" });
+  const submit = el("button", { type: "submit", class: "primary", disabled: true }, "Book table");
+  const close = el("button", { type: "button", class: "ghost" }, "Close");
+
+  const form = el(
+    "form",
+    { class: "booking-card form" },
+    el("strong", {}, "Book a table"),
+    el("div", { class: "row" }, el("label", {}, "Date", date), el("label", {}, "People", party)),
+    el("div", { class: "label" }, "Time"),
+    times,
+    el("div", { class: "row" }, el("label", {}, "Name", name), el("label", {}, "Phone", phone)),
+    el("label", {}, "Notes", notes),
+    error,
+    el("div", { class: "actions" }, close, submit),
+  );
+
+  async function loadTimes() {
+    chosenTime = null;
+    submit.disabled = true;
+    times.replaceChildren(el("span", { class: "hint" }, "Checking…"));
+    try {
+      const data = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}/availability?date=${date.value}&partySize=${party.value}`);
+      times.replaceChildren(
+        ...(data.times.length
+          ? data.times.map((t) =>
+              el(
+                "button",
+                {
+                  type: "button",
+                  "aria-pressed": "false",
+                  onclick: (e) => {
+                    chosenTime = t;
+                    for (const b of times.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === e.currentTarget));
+                    submit.disabled = false;
+                  },
+                },
+                t,
+              ),
+            )
+          : [el("span", { class: "hint" }, data.reason || "No free times that day.")]),
+      );
+    } catch (err) {
+      times.replaceChildren(el("span", { class: "hint" }, err.message));
+    }
+  }
+
+  date.addEventListener("change", loadTimes);
+  party.addEventListener("change", loadTimes);
+  close.addEventListener("click", () => form.remove());
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    submit.disabled = true;
+    try {
+      const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: date.value,
+          time: chosenTime,
+          partySize: Number(party.value),
+          name: name.value,
+          phone: phone.value,
+          notes: notes.value,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Booking failed (${res.status})`);
+      form.remove();
+      addBookingConfirmation(data.booking);
+    } catch (err) {
+      error.textContent = err.message;
+      submit.disabled = false;
+      if (/booked|available/i.test(err.message)) loadTimes();
+    }
+  });
+
+  addCard(form);
+  loadTimes();
+}
+
+function shiftDate(date, days) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 // ---------- Helpers ----------

@@ -378,3 +378,123 @@ button {
     font-size: 13px;
   }
 }
+
+/* Bookings in chat */
+.ghost.accent {
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.booking-card {
+  align-self: flex-start;
+  width: min(420px, 92%);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 6px;
+}
+
+.booking-card.confirmed {
+  border-color: var(--brand);
+}
+
+.booking-card .ref {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--brand);
+}
+
+.booking-card .hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.booking-card.cancelled {
+  color: var(--muted);
+}
+
+.booking-card.form label,
+.booking-card.form .label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.booking-card .row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.booking-card input,
+.booking-card select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.booking-card .times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.booking-card .times button {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.booking-card .times button[aria-pressed="true"] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.booking-card .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.booking-card .primary {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+.booking-card .primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--error);
+  font-size: 13px;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .booking-card .row {
+    grid-template-columns: 1fr;
+  }
+}

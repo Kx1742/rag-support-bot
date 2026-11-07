@@ -56,10 +56,34 @@ export interface ChatRequest {
   messages: ChatMessage[];
 }
 
+/** A function the model may call, described with a JSON-schema "parameters" object. */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface ToolCallRecord extends ToolCall {
+  result: unknown;
+}
+
+/** The tools available in one conversation, and how to run them. */
+export interface ToolRunner {
+  definitions: ToolDefinition[];
+  run(call: ToolCall): Promise<unknown>;
+}
+
 /** Anything that can generate a chat reply. */
 export interface ChatProvider {
   readonly model: string;
   generate(request: ChatRequest): Promise<string>;
   /** Optional token-by-token streaming. Falls back to generate() when missing. */
   stream?(request: ChatRequest): AsyncIterable<string>;
+  /** Optional function calling: loops until the model answers in text. */
+  chatWithTools?(request: ChatRequest, tools: ToolRunner): Promise<{ text: string; calls: ToolCallRecord[] }>;
 }

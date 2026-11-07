@@ -5,6 +5,8 @@ import { ExtractiveChat, LocalEmbedder } from "./llm/offline.ts";
 import { Assistant } from "./rag/assistant.ts";
 import { buildIndex, isIndexFresh } from "./rag/indexer.ts";
 import { loadIndex, saveIndex, VectorStore } from "./rag/vectorStore.ts";
+import { createBookingTools } from "./shop/chatTools.ts";
+import type { Shop } from "./shop/shop.ts";
 import { indexPath, loadTenant } from "./tenant.ts";
 import type { ChatProvider, EmbeddingProvider } from "./types.ts";
 
@@ -61,8 +63,11 @@ export async function ingestTenant(
   return { index, path, skipped: false };
 }
 
-/** Builds a ready-to-use assistant for a tenant, indexing first if needed. */
-export async function createAssistant(tenantId: string, providers = createProviders()): Promise<Assistant> {
+/**
+ * Builds a ready-to-use assistant for a tenant, indexing first if needed.
+ * Pass the tenant's shop to let the assistant take bookings (needs a model with function calling).
+ */
+export async function createAssistant(tenantId: string, providers = createProviders(), shop: Shop | null = null): Promise<Assistant> {
   const { config } = await loadTenant(tenantId);
   const { index } = await ingestTenant(tenantId, { embedder: providers.embedder });
   const minScore = process.env.RAG_MIN_SCORE ? Number(process.env.RAG_MIN_SCORE) : providers.defaultMinScore;
@@ -73,5 +78,6 @@ export async function createAssistant(tenantId: string, providers = createProvid
     embedder: providers.embedder,
     chat: providers.chat,
     options: { minScore },
+    tools: shop ? createBookingTools(shop) : undefined,
   });
 }

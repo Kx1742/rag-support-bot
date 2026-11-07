@@ -19,6 +19,7 @@ Bean & Byte Café is a fictional demo business.
 
 ## Milk Options
 Whole milk is standard. Oat, almond and soy milk are available for an extra $0.60.
+An extra espresso shot costs $0.80.
 Lactose-free milk is available at no extra charge.
 
 ## Food

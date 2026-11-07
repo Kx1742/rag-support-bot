@@ -1,7 +1,10 @@
-import type { ChatProvider, ChatRequest, EmbedKind, EmbeddingProvider } from "../types.ts";
+import type { ChatProvider, ChatRequest, EmbedKind, EmbeddingProvider, ToolCallRecord, ToolRunner } from "../types.ts";
 
 interface GenerateResponse {
-  candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+  candidates?: {
+    content?: { parts?: { text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }[] };
+    finishReason?: string;
+  }[];
   promptFeedback?: { blockReason?: string };
 }
 
@@ -143,6 +146,47 @@ export class GeminiClient implements ChatProvider, EmbeddingProvider {
       }
     }
     if (!gotText) throw new Error(`Gemini returned no text (finishReason: ${lastFinish})`);
+  }
+
+  /**
+   * Function-calling loop: the model either answers in text, or asks us to call tools.
+   * We run the tools, send the results back, and repeat (up to maxSteps rounds).
+   */
+  async chatWithTools(request: ChatRequest, tools: ToolRunner, maxSteps = 5): Promise<{ text: string; calls: ToolCallRecord[] }> {
+    const base = this.chatBody(request);
+    const contents: unknown[] = [...base.contents];
+    const calls: ToolCallRecord[] = [];
+    const toolsBody = [{ functionDeclarations: tools.definitions }];
+
+    for (let step = 0; step < maxSteps; step++) {
+      const json = (await this.post(`models/${this.chatModel}:generateContent`, { ...base, contents, tools: toolsBody })) as GenerateResponse;
+      assertNotBlocked(json);
+      const parts = json.candidates?.[0]?.content?.parts ?? [];
+      const requested = parts.filter((p) => p.functionCall);
+
+      if (requested.length === 0) {
+        const text = textOf(json).trim();
+        if (!text) throw new Error(`Gemini returned no text (finishReason: ${json.candidates?.[0]?.finishReason ?? "unknown"})`);
+        return { text, calls };
+      }
+
+      // Send the model's turn back unchanged (it may carry thought signatures).
+      contents.push({ role: "model", parts });
+      const responses = [];
+      for (const part of requested) {
+        const call = { name: part.functionCall!.name, args: part.functionCall!.args ?? {} };
+        let result: unknown;
+        try {
+          result = await tools.run(call);
+        } catch (err) {
+          result = { error: (err as Error).message };
+        }
+        calls.push({ ...call, result });
+        responses.push({ functionResponse: { name: call.name, response: { result } } });
+      }
+      contents.push({ role: "user", parts: responses });
+    }
+    throw new Error("Gemini kept calling tools without answering");
   }
 
   private chatBody(request: ChatRequest) {
