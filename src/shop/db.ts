@@ -60,6 +60,35 @@ const MIGRATIONS = [
   );
   CREATE INDEX order_items_by_order ON order_items (order_id);
   `,
+  // 2: staff accounts & roles, drink options, payments, duplicate-order protection
+  `
+  CREATE TABLE staff (
+    id              INTEGER PRIMARY KEY,
+    username        TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL,
+    role            TEXT NOT NULL CHECK (role IN ('manager', 'staff')),
+    pin_hash        TEXT NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until    TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+  );
+
+  ALTER TABLE order_items ADD COLUMN options TEXT NOT NULL DEFAULT '[]';
+
+  ALTER TABLE orders ADD COLUMN client_ref TEXT;
+  CREATE UNIQUE INDEX orders_by_client_ref ON orders (client_ref) WHERE client_ref IS NOT NULL;
+  ALTER TABLE orders ADD COLUMN created_by TEXT NOT NULL DEFAULT '';
+  ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid';
+  ALTER TABLE orders ADD COLUMN payment_method TEXT;
+  ALTER TABLE orders ADD COLUMN amount_tendered INTEGER;
+  ALTER TABLE orders ADD COLUMN paid_at TEXT;
+  ALTER TABLE orders ADD COLUMN paid_by TEXT;
+  ALTER TABLE orders ADD COLUMN refunded_at TEXT;
+  ALTER TABLE orders ADD COLUMN refunded_by TEXT;
+  ALTER TABLE orders ADD COLUMN refund_reason TEXT;
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */

@@ -19,14 +19,27 @@ describe("StaffAuth", () => {
     assert.equal(passwordFromEnv({ STAFF_PASSWORD: "short" })("x"), undefined);
   });
 
-  it("issues sessions that expire", () => {
+  it("checks the owner password and issues sessions that expire", () => {
     let now = 0;
     const auth = new StaffAuth({ passwordFor: () => PASSWORD, ttlMs: 1000, now: () => now });
-    assert.equal(auth.login("t", "wrong"), null);
-    const token = auth.login("t", PASSWORD)!;
-    assert.equal(auth.verify(token)?.tenantId, "t");
+    assert.equal(auth.checkOwner("t", "wrong"), false);
+    assert.equal(auth.checkOwner("t", PASSWORD), true);
+    const token = auth.start({ tenantId: "t", staffId: null, username: "owner", name: "Owner", role: "manager" });
+    assert.equal(auth.verify(token)?.role, "manager");
     now = 1000;
     assert.equal(auth.verify(token), null);
+  });
+
+  it("can sign one person out everywhere", () => {
+    const auth = new StaffAuth({ passwordFor: () => PASSWORD });
+    const sam = { tenantId: "t", staffId: 7, username: "sam", name: "Sam", role: "staff" as const };
+    const a = auth.start(sam);
+    const b = auth.start(sam);
+    const other = auth.start({ ...sam, staffId: 8, username: "ana" });
+    auth.endSessionsFor("t", 7);
+    assert.equal(auth.verify(a), null);
+    assert.equal(auth.verify(b), null);
+    assert.ok(auth.verify(other));
   });
 });
 
@@ -45,7 +58,7 @@ describe("desk and booking HTTP API", async () => {
     getAssistant: async (id) => (id === tenant.id ? assistant : null),
     getShop: async (id) => (id === tenant.id ? shop : null),
     staffAuth: new StaffAuth({ passwordFor: (id) => (id === tenant.id ? PASSWORD : undefined) }),
-    loginLimiter: new RateLimiter({ capacity: 3, perMinute: 1 }),
+    loginLimiter: new RateLimiter({ capacity: 20, perMinute: 1 }),
     publicDir: resolve(import.meta.dirname, "..", "public"),
     defaultTenant: tenant.id,
     limiter: new RateLimiter({ capacity: 100, perMinute: 100 }),
@@ -185,6 +198,136 @@ describe("desk and booking HTTP API", async () => {
     assert.equal((await seated.json()).booking.status, "seated");
   });
 
+  // ----- roles -----
+
+  const login = async (body: object) => {
+    const res = await desk("/login", { method: "POST", body: { tenantId: tenant.id, ...body }, cookie: "" });
+    return { res, cookie: res.headers.get("set-cookie")?.split(";")[0] ?? "", me: await res.json() };
+  };
+  let managerCookie = "";
+  let staffCookie = "";
+  let staffId = 0;
+
+  it("owner adds a manager and a staff member", async () => {
+    const owner = await login({ username: "owner", pin: PASSWORD });
+    assert.equal(owner.me.user.role, "manager");
+
+    const add = (body: object) => desk("/staff", { method: "POST", body, cookie: owner.cookie });
+    assert.equal((await add({ username: "mia", name: "Mia", role: "manager", pin: "5937" })).status, 201);
+    const sam = await add({ username: "sam", name: "Sam", role: "staff", pin: "4826" });
+    assert.equal(sam.status, 201);
+    staffId = (await sam.json()).member.id;
+    assert.equal((await add({ username: "weak", name: "Weak", role: "staff", pin: "1111" })).status, 400);
+
+    const list = await (await desk("/staff", { cookie: owner.cookie })).json();
+    assert.deepEqual(list.staff.map((s: { username: string }) => s.username).sort(), ["mia", "sam"]);
+    assert.ok(!JSON.stringify(list).includes("scrypt"), "PIN hashes never leave the server");
+    assert.ok(list.rolePermissions.manager.includes("staff.manage"));
+  });
+
+  it("staff log in with their own PIN and get a limited role", async () => {
+    assert.equal((await login({ username: "sam", pin: "0000" })).res.status, 401);
+    const sam = await login({ username: "sam", pin: "4826" });
+    assert.equal(sam.res.status, 200);
+    assert.equal(sam.me.user.role, "staff");
+    assert.ok(!sam.me.permissions.includes("payments.refund"));
+    staffCookie = sam.cookie;
+    managerCookie = (await login({ username: "mia", pin: "5937" })).cookie;
+  });
+
+  it("staff can ring up and take payment, but can't see sales, refund or manage people", async () => {
+    const as = (cookie: string) => (path: string, init: { method?: string; body?: unknown } = {}) => desk(path, { ...init, cookie });
+    const staff = as(staffCookie);
+    const manager = as(managerCookie);
+
+    const created = await staff("/orders", {
+      method: "POST",
+      body: {
+        type: "takeaway",
+        clientRef: "till-test-0001",
+        items: [{ itemId: "latte", quantity: 1, options: { size: "large", milk: "oat" } }],
+        payment: { method: "cash", tendered: 1000 },
+      },
+    });
+    assert.equal(created.status, 201);
+    const { order } = await created.json();
+    assert.equal(order.total, 475 + 70 + 60);
+    assert.equal(order.payment.change, 1000 - 605);
+    assert.equal(order.createdBy, "Sam");
+
+    const summary = (await (await staff("/orders")).json()).summary;
+    assert.equal(summary.sales, undefined, "staff don't see money totals");
+    assert.ok((await (await manager("/orders")).json()).summary.sales >= 605);
+
+    for (const [path, init] of [
+      ["/report", {}],
+      ["/staff", {}],
+      [`/orders/${order.id}/refund`, { method: "POST", body: { reason: "test" } }],
+      ["/staff", { method: "POST", body: { username: "x", name: "X", role: "manager", pin: "5937" } }],
+    ] as const) {
+      const res = await staff(path, init);
+      assert.equal(res.status, 403, `${path} should be managers only`);
+      assert.match((await res.json()).error, /Only managers/);
+    }
+
+    const cancel = await staff(`/orders/${order.id}`, { method: "PATCH", body: { status: "cancelled" } });
+    assert.equal(cancel.status, 409, "paid orders can't be cancelled, only refunded");
+
+    const refund = await manager(`/orders/${order.id}/refund`, { method: "POST", body: { reason: "Wrong milk" } });
+    assert.equal(refund.status, 200);
+    assert.equal((await refund.json()).order.payment.refundedBy, "Mia");
+
+    const report = await (await manager("/report")).json();
+    assert.equal(report.refunds[0].reason, "Wrong milk");
+  });
+
+  it("deactivating someone signs them out immediately", async () => {
+    assert.equal((await desk("/me", { cookie: staffCookie })).status, 200);
+    const off = await desk(`/staff/${staffId}`, { method: "PATCH", body: { active: false }, cookie: managerCookie });
+    assert.equal(off.status, 200);
+    const me = await desk("/me", { cookie: staffCookie });
+    assert.equal(me.status, 401);
+    assert.equal((await login({ username: "sam", pin: "4826" })).res.status, 401);
+  });
+
+  it("managers can't lock themselves out", async () => {
+    const me = await (await desk("/me", { cookie: managerCookie })).json();
+    const list = await (await desk("/staff", { cookie: managerCookie })).json();
+    const mia = list.staff.find((s: { username: string }) => s.username === me.user.username);
+    const res = await desk(`/staff/${mia.id}`, { method: "PATCH", body: { active: false }, cookie: managerCookie });
+    assert.equal(res.status, 400);
+  });
+
+  it("customers can look up and cancel only their own booking", async () => {
+    const post = (path: string, body: object) =>
+      fetch(`${base}/api/tenants/${tenant.id}/bookings/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const made = await (
+      await fetch(`${base}/api/tenants/${tenant.id}/bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: "2026-11-15", time: "10:00", partySize: 2, name: "Lee", phone: "555 010 5555" }),
+      })
+    ).json();
+    const ref = made.booking.reference;
+
+    const wrong = await post("lookup", { reference: ref, phone: "555 010 0000" });
+    const missing = await post("lookup", { reference: "BB-ZZZZZ", phone: "555 010 5555" });
+    assert.equal(wrong.status, 404);
+    assert.deepEqual(await wrong.json(), await missing.json(), "same answer, so references can't be probed");
+
+    const found = await (await post("lookup", { reference: ref.toLowerCase(), phone: "(555) 010-5555" })).json();
+    assert.equal(found.booking.name, "Lee");
+    assert.ok(!("phone" in found.booking));
+
+    const cancelled = await (await post("cancel", { reference: ref, phone: "5550105555" })).json();
+    assert.equal(cancelled.booking.status, "cancelled");
+    assert.equal((await post("cancel", { reference: ref, phone: "5550105555" })).status, 409);
+  });
+
   it("logs out", async () => {
     await desk("/logout", { method: "POST" });
     assert.equal((await desk("/me")).status, 401);
@@ -192,7 +335,7 @@ describe("desk and booking HTTP API", async () => {
 
   it("rate limits login attempts", async () => {
     let res: Response | undefined;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 30; i++) {
       res = await desk("/login", { method: "POST", body: { tenantId: tenant.id, password: "guess" }, cookie: "" });
       if (res.status === 429) break;
     }

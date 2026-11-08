@@ -103,7 +103,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     if (handled) return;
   }
 
-  const tenantMatch = /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings))?$/.exec(path);
+  const tenantMatch = /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel))?$/.exec(path);
   if (tenantMatch) {
     const tenantId = decodeURIComponent(tenantMatch[1]);
     const assistant = await deps.getAssistant(tenantId);
@@ -127,6 +127,17 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       if (!isDate(date)) throw new HttpError(400, "date must be YYYY-MM-DD");
       const partySize = Number(url.searchParams.get("partySize") ?? 2);
       sendJson(res, 200, { date, partySize, ...shop.bookings.availableTimes(date, partySize) });
+      return;
+    }
+    // Customers manage their own booking with the reference + phone they booked with.
+    if ((action === "bookings/lookup" || action === "bookings/cancel") && req.method === "POST") {
+      takeRateLimit(req, res, deps);
+      const b = await readObject(req);
+      const reference = String(b.reference ?? "");
+      const phone = String(b.phone ?? "");
+      const booking =
+        action === "bookings/cancel" ? shop.bookings.cancelByReference(reference, phone) : shop.bookings.findForCustomer(reference, phone);
+      sendJson(res, 200, { booking: shop.bookings.toPublic(booking) });
       return;
     }
     if (action === "bookings" && req.method === "POST") {

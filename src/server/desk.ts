@@ -1,20 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { BOOKING_STATUSES, type BookingStatus } from "../shop/bookings.ts";
-import { ORDER_STATUSES, type OrderInput, type OrderStatus } from "../shop/orders.ts";
+import { ORDER_STATUSES, type OrderInput, type OrderStatus, PAYMENT_METHODS, type PaymentInput } from "../shop/orders.ts";
 import type { Shop, ShopChange } from "../shop/shop.ts";
+import { OWNER_USERNAME, ROLES, type Role } from "../shop/staff.ts";
 import { isDate } from "../shop/time.ts";
 import { assertValidTenantId } from "../tenant.ts";
 import type { StaffAuth, StaffSession } from "./auth.ts";
-import {
-  clientIp,
-  HttpError,
-  idParam,
-  parseCookies,
-  readObject,
-  sendJson,
-  sendSse,
-  startSse,
-} from "./httpUtil.ts";
+import { clientIp, HttpError, idParam, parseCookies, readObject, sendJson, sendSse, startSse } from "./httpUtil.ts";
+import { can, PERMISSIONS, type Permission, ROLE_PERMISSIONS } from "./permissions.ts";
 import type { RateLimiter } from "./rateLimit.ts";
 
 export const SESSION_COOKIE = "desk_session";
@@ -34,7 +27,8 @@ export interface DeskDeps {
 export async function handleDesk(req: IncomingMessage, res: ServerResponse, url: URL, deps: DeskDeps): Promise<boolean> {
   const path = url.pathname;
   if (!path.startsWith("/api/desk/")) return false;
-  const route = `${req.method} ${path.slice("/api/desk".length)}`;
+  const sub = path.slice("/api/desk".length);
+  const route = `${req.method} ${sub}`;
 
   if (route === "POST /login") {
     await login(req, res, deps);
@@ -47,10 +41,22 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
   }
 
   // Everything below needs a logged-in staff member.
-  const session = deps.staffAuth.verify(parseCookies(req)[SESSION_COOKIE]);
+  const token = parseCookies(req)[SESSION_COOKIE];
+  const session = deps.staffAuth.verify(token);
   if (!session) throw new HttpError(401, "Please log in");
   const shop = await deps.getShop(session.tenantId);
   if (!shop) throw new HttpError(404, "This business has no shop features");
+
+  // Re-check the account on every request so deactivation and role changes apply immediately.
+  const user = currentUser(session, shop);
+  if (!user) {
+    deps.staffAuth.logout(token);
+    throw new HttpError(401, "Your account is no longer active. Please log in again.");
+  }
+  const need = (permission: Permission) => {
+    if (!can(user.role, permission)) throw new HttpError(403, `Only managers can do that (${PERMISSIONS[permission].toLowerCase()}).`);
+  };
+  const actor = { name: user.name };
 
   const date = url.searchParams.get("date") ?? undefined;
   if (date !== undefined && !isDate(date)) throw new HttpError(400, "date must be YYYY-MM-DD");
@@ -58,13 +64,17 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
 
   switch (route) {
     case "GET /me":
-      return ok(res, deskInfo(shop, session));
+      return ok(res, deskInfo(shop, user));
     case "GET /events":
       liveEvents(req, res, shop, deps.heartbeatMs ?? 25_000);
       return true;
+
+    // ----- bookings -----
     case "GET /bookings":
+      need("bookings.manage");
       return ok(res, { bookings: shop.bookings.list(date ?? shop.bookings.today().date) });
     case "POST /bookings": {
+      need("bookings.manage");
       const b = await readObject(req);
       const booking = shop.bookings.create(
         {
@@ -81,51 +91,121 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
       return ok(res, { booking }, 201);
     }
     case "GET /availability": {
+      need("bookings.manage");
       const partySize = Number(url.searchParams.get("partySize") ?? 2);
       const tableId = url.searchParams.get("tableId") || undefined;
       if (tableId && !shop.config.tables.some((t) => t.id === tableId)) throw new HttpError(400, "Unknown table");
       return ok(res, shop.bookings.availableTimes(date ?? shop.bookings.today().date, partySize, { staff: true, tableId }));
     }
+
+    // ----- menu & orders -----
     case "GET /menu":
-      return ok(res, { menu: shop.menu.list() });
-    case "GET /orders":
-      return ok(res, { orders: shop.orders.list(date), summary: shop.orders.summary(date) });
+      return ok(res, { menu: shop.menu.list(), optionGroups: shop.menu.optionGroups() });
+    case "GET /orders": {
+      const summary = shop.orders.summary(date);
+      // Staff see workload numbers; money totals are for managers.
+      const visible = can(user.role, "sales.view") ? summary : { orders: summary.orders, items: summary.items, open: summary.open, unpaid: summary.unpaid };
+      return ok(res, { orders: shop.orders.list(date), summary: visible });
+    }
     case "POST /orders": {
+      need("till.use");
       const body = await readObject(req);
-      const order = shop.orders.create({
-        type: body.type as OrderInput["type"],
-        tableId: body.tableId ? String(body.tableId) : null,
-        customerName: String(body.customerName ?? ""),
-        notes: String(body.notes ?? ""),
-        items: Array.isArray(body.items)
-          ? body.items.map((i: { itemId?: unknown; quantity?: unknown; note?: unknown }) => ({
-              itemId: String(i?.itemId ?? ""),
-              quantity: Number(i?.quantity),
-              note: String(i?.note ?? ""),
-            }))
-          : [],
+      const payment = body.payment ? parsePayment(body.payment) : undefined;
+      if (payment) need("payments.take");
+      const order = shop.orders.create(parseOrder(body), {
+        by: actor,
+        clientRef: body.clientRef === undefined ? undefined : String(body.clientRef),
+        payment,
       });
       return ok(res, { order }, 201);
     }
+    case "GET /report":
+      need("reports.view");
+      return ok(res, shop.orders.report(date));
+
+    // ----- staff accounts -----
+    case "GET /staff":
+      need("staff.manage");
+      return ok(res, {
+        staff: shop.staff.list(),
+        ownerLogin: deps.staffAuth.ownerEnabled(shop.tenantId),
+        // The same table the server enforces, so the help screen can't drift from reality.
+        rolePermissions: ROLE_PERMISSIONS,
+        permissionLabels: PERMISSIONS,
+      });
+    case "POST /staff": {
+      need("staff.manage");
+      const b = await readObject(req);
+      const member = await shop.staff.create({
+        username: String(b.username ?? ""),
+        name: String(b.name ?? ""),
+        role: String(b.role ?? "") as Role,
+        pin: String(b.pin ?? ""),
+      });
+      return ok(res, { member }, 201);
+    }
   }
 
-  if (req.method === "PATCH" && (match = /^\/bookings\/(\d+)$/.exec(path.slice(9)))) {
+  const rest = sub;
+  if (req.method === "PATCH" && (match = /^\/bookings\/(\d+)$/.exec(rest))) {
+    need("bookings.manage");
     const status = String((await readObject(req)).status) as BookingStatus;
     if (!BOOKING_STATUSES.includes(status)) throw new HttpError(400, "Unknown booking status");
     return ok(res, { booking: shop.bookings.setStatus(idParam(match[1]), status) });
   }
-  if (req.method === "PATCH" && (match = /^\/orders\/(\d+)$/.exec(path.slice(9)))) {
+  if (req.method === "PATCH" && (match = /^\/orders\/(\d+)$/.exec(rest))) {
+    need("orders.manage");
     const status = String((await readObject(req)).status) as OrderStatus;
     if (!ORDER_STATUSES.includes(status)) throw new HttpError(400, "Unknown order status");
     return ok(res, { order: shop.orders.setStatus(idParam(match[1]), status) });
   }
-  if (req.method === "PATCH" && (match = /^\/menu\/([a-z0-9-]+)$/.exec(path.slice(9)))) {
+  if (req.method === "POST" && (match = /^\/orders\/(\d+)\/pay$/.exec(rest))) {
+    need("payments.take");
+    return ok(res, { order: shop.orders.pay(idParam(match[1]), parsePayment(await readObject(req)), actor) });
+  }
+  if (req.method === "POST" && (match = /^\/orders\/(\d+)\/refund$/.exec(rest))) {
+    need("payments.refund");
+    return ok(res, { order: shop.orders.refund(idParam(match[1]), String((await readObject(req)).reason ?? ""), actor) });
+  }
+  if (req.method === "PATCH" && (match = /^\/menu\/([a-z0-9-]+)$/.exec(rest))) {
+    need("menu.soldOut");
     const body = await readObject(req);
     if (typeof body.available !== "boolean") throw new HttpError(400, "available must be true or false");
     return ok(res, { item: shop.menu.setAvailable(match[1], body.available) });
   }
+  if (req.method === "PATCH" && (match = /^\/staff\/(\d+)$/.exec(rest))) {
+    need("staff.manage");
+    const id = idParam(match[1]);
+    const b = await readObject(req);
+    if (id === user.staffId && (b.active === false || (b.role !== undefined && b.role !== "manager"))) {
+      throw new HttpError(400, "You can't deactivate or demote your own account. Ask another manager.");
+    }
+    const member = await shop.staff.update(id, {
+      name: b.name === undefined ? undefined : String(b.name),
+      role: b.role === undefined ? undefined : (String(b.role) as Role),
+      active: typeof b.active === "boolean" ? b.active : undefined,
+      pin: b.pin === undefined ? undefined : String(b.pin),
+    });
+    // A new PIN or deactivation signs them out everywhere.
+    if (b.pin !== undefined || member.active === false) deps.staffAuth.endSessionsFor(shop.tenantId, id);
+    return ok(res, { member });
+  }
 
   throw new HttpError(404, "Not found");
+}
+
+interface CurrentUser {
+  staffId: number | null;
+  username: string;
+  name: string;
+  role: Role;
+}
+
+function currentUser(session: StaffSession, shop: Shop): CurrentUser | null {
+  if (session.staffId === null) return { staffId: null, username: OWNER_USERNAME, name: session.name, role: "manager" };
+  const member = shop.staff.get(session.staffId);
+  if (!member?.active) return null;
+  return { staffId: member.id, username: member.username, name: member.name, role: member.role };
 }
 
 async function login(req: IncomingMessage, res: ServerResponse, deps: DeskDeps): Promise<void> {
@@ -134,26 +214,40 @@ async function login(req: IncomingMessage, res: ServerResponse, deps: DeskDeps):
     res.setHeader("Retry-After", String(limit.retryAfterSec));
     throw new HttpError(429, `Too many login attempts. Try again in ${limit.retryAfterSec} seconds.`);
   }
+  const fail = () => new HttpError(401, "Wrong username or PIN");
   const body = await readObject(req);
   const tenantId = String(body.tenantId ?? "");
   try {
     assertValidTenantId(tenantId);
   } catch {
-    throw new HttpError(401, "Wrong business or password");
+    throw fail();
   }
-  if (!deps.staffAuth.isEnabled(tenantId) || !(await deps.getShop(tenantId))) {
-    throw new HttpError(401, "Wrong business or password");
-  }
-  const token = deps.staffAuth.login(tenantId, String(body.password ?? ""));
-  if (!token) throw new HttpError(401, "Wrong business or password");
+  const shop = await deps.getShop(tenantId);
+  if (!shop) throw fail();
 
-  const shop = (await deps.getShop(tenantId))!;
-  sendJson(res, 200, deskInfo(shop, deps.staffAuth.verify(token)!), { "Set-Cookie": cookie(token, 12 * 60 * 60, deps) });
+  // "owner" (or no username, for older clients) = the password from .env.
+  const username = String(body.username ?? "").trim().toLowerCase() || OWNER_USERNAME;
+  const secret = String(body.pin ?? body.password ?? "");
+  let identity;
+  if (username === OWNER_USERNAME) {
+    if (!deps.staffAuth.checkOwner(tenantId, secret)) throw fail();
+    identity = { tenantId, staffId: null, username: OWNER_USERNAME, name: "Owner", role: "manager" as const };
+  } else {
+    const member = await shop.staff.authenticate(username, secret);
+    if (!member) throw fail();
+    identity = { tenantId, staffId: member.id, username: member.username, name: member.name, role: member.role };
+  }
+
+  const token = deps.staffAuth.start(identity);
+  sendJson(res, 200, deskInfo(shop, identity), { "Set-Cookie": cookie(token, 12 * 60 * 60, deps) });
 }
 
-function deskInfo(shop: Shop, session: StaffSession) {
+function deskInfo(shop: Shop, user: CurrentUser & { tenantId?: string }) {
   return {
-    tenantId: session.tenantId,
+    tenantId: shop.tenantId,
+    user: { name: user.name, username: user.username, role: user.role },
+    permissions: ROLE_PERMISSIONS[user.role],
+    roles: ROLES,
     timezone: shop.config.timezone,
     currency: shop.config.currency,
     today: shop.bookings.today().date,
@@ -163,12 +257,35 @@ function deskInfo(shop: Shop, session: StaffSession) {
   };
 }
 
+function parseOrder(body: Record<string, unknown>): OrderInput {
+  return {
+    type: body.type as OrderInput["type"],
+    tableId: body.tableId ? String(body.tableId) : null,
+    customerName: String(body.customerName ?? ""),
+    notes: String(body.notes ?? ""),
+    items: Array.isArray(body.items)
+      ? body.items.map((i: { itemId?: unknown; quantity?: unknown; note?: unknown; options?: unknown }) => ({
+          itemId: String(i?.itemId ?? ""),
+          quantity: Number(i?.quantity),
+          note: String(i?.note ?? ""),
+          options: i?.options && typeof i.options === "object" && !Array.isArray(i.options) ? (i.options as Record<string, string | string[]>) : {},
+        }))
+      : [],
+  };
+}
+
+function parsePayment(raw: unknown): PaymentInput {
+  const p = (raw ?? {}) as { method?: unknown; tendered?: unknown };
+  const method = String(p.method ?? "") as PaymentInput["method"];
+  if (!PAYMENT_METHODS.includes(method)) throw new HttpError(400, "Payment method must be cash or card");
+  return { method, tendered: p.tendered === undefined ? undefined : Number(p.tendered) };
+}
+
 /** Pushes a "change" event to the desk whenever bookings, orders or the menu change. */
 function liveEvents(req: IncomingMessage, res: ServerResponse, shop: Shop, heartbeatMs: number): void {
   startSse(res);
   sendSse(res, "ready", { ok: true });
   const onChange = (change: ShopChange) => {
-    // New bookings carry a short summary so the desk can announce them whatever date it shows.
     // New bookings and orders carry a short summary so the desk can announce them.
     const created = change.action === "created";
     const booking = created && change.kind === "booking" ? shop.bookings.get(Number(change.id)) : null;
@@ -178,7 +295,7 @@ function liveEvents(req: IncomingMessage, res: ServerResponse, shop: Shop, heart
       ...(booking && {
         booking: { name: booking.name, date: booking.date, time: booking.time, partySize: booking.partySize, source: booking.source },
       }),
-      ...(order && { order: { number: order.number, type: order.type, tableId: order.tableId } }),
+      ...(order && { order: { number: order.number, type: order.type, tableId: order.tableId, by: order.createdBy } }),
     });
   };
   const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), heartbeatMs);

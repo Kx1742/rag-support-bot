@@ -17,6 +17,9 @@ Bean & Byte Café is a fictional demo business.
 - Hot Chocolate — $4.00
 - Fresh Orange Juice — $4.50
 
+## Sizes and Options
+Most drinks come in Regular or Large (Large is $0.70 more). Any coffee can be made decaf or iced at no extra charge.
+
 ## Milk Options
 Whole milk is standard. Oat, almond and soy milk are available for an extra $0.60.
 An extra espresso shot costs $0.80.

@@ -9,8 +9,9 @@ order queue, a bookings list and menu controls, all updating live.
 - **Customers** chat on the website: "Do you have oat milk?", "Table for 4 on Saturday at 10?"
 - **The AI** (Google Gemini) answers from the café's documents with citations, and checks availability
   and makes bookings through function calling, using the shop's real booking rules
-- **Staff** see new bookings appear instantly on the desk, ring up orders at the till, and move
-  orders through New → Preparing → Ready
+- **Staff** see new bookings appear instantly on the desk, ring up orders with drink options,
+  take cash or card payment, and move orders through New → Preparing → Ready
+- **Managers** also refund orders, see the end-of-day sales report, and manage staff accounts
 
 It's multi-tenant: each business is a folder with its own documents, menu, tables and opening hours.
 
@@ -24,23 +25,31 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
 - Grounded answers with clickable citations, streamed over Server-Sent Events
 - **Books and cancels tables in conversation** (Gemini function calling), always confirming first
 - "Book a table" form in the chat, which also works without AI
+- **My booking**: look up or cancel your own booking with its reference + phone number
 - Follow-up questions, suggested questions, business branding, dark mode, works on phones
 
-**Staff desk** (`/desk`, password protected)
-- **Till / POS**: menu grid by category, ticket with quantities, takeaway or dine-in by table
-- **Order queue**: New → Preparing → Ready → Picked up, with today's sales summary
+**Staff desk** (`/desk`, each person logs in with their own username + PIN)
+- **Till / POS**: menu grid by category, item search, **drink options** (size, milk, extra shot, iced...)
+  with per-item notes, takeaway or dine-in by table
+- **Payments**: cash with quick amounts and change due, or card confirmed from the card machine;
+  pay now or keep a table's order open and pay later
+- **Order queue**: New → Preparing → Ready → Picked up, with waiting timers, paid/unpaid labels
+  and who rang each order up
 - **Bookings**: day view, seat, finish, no-show and cancel, plus phone and walk-in bookings with table choice
 - **Menu**: mark items sold out; the till greys them out immediately
 - **Live updates**: new bookings (on any date) and orders appear on every open desk screen instantly
-- Payments are deliberately not handled yet (see roadmap)
+- **Refunds** (managers): with a reason; paid orders can't simply be cancelled
+- **End-of-day report** (managers): sales, cash vs card, unpaid, refunds, best sellers, sales by hour, CSV export
+- **Staff accounts** (managers): add people, change roles, reset PINs, deactivate
 
 **Engineering**
 - Zero runtime dependencies: Node's built-in `node:http`, `node:sqlite` and `fetch`
 - Booking rules enforced server-side: opening hours, slot grid, notice period, table sizes,
   overlap checks, per-phone limits
-- Prices always come from the database, never from the browser
+- Prices and option surcharges always come from the server, never from the browser
+- Duplicate-order protection: each till order carries an idempotency key, so a network retry can't charge twice
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
-- 78 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 97 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
@@ -87,6 +96,28 @@ flowchart LR
 Rule violations ("we seat up to 6") are returned to the model as tool results so it can explain
 them. Unexpected errors are not.
 
+## Roles and permissions
+
+| | Customer | Staff | Manager |
+|---|:-:|:-:|:-:|
+| Chat, book a table, look up / cancel own booking (public site) | ✓ | ✓ | ✓ |
+| Ring up orders, take payments, move orders along | – | ✓ | ✓ |
+| Create, seat and cancel bookings; mark items sold out | – | ✓ | ✓ |
+| Cancel **unpaid** orders | – | ✓ | ✓ |
+| Refund paid orders | – | – | ✓ |
+| See sales totals and the end-of-day report | – | – | ✓ |
+| Add staff, change roles, reset PINs | – | – | ✓ |
+
+- Customers never log in. They prove a booking is theirs with its reference **and** phone number.
+- Staff and managers log in at `/desk` with their own **username + PIN** (hashed with scrypt).
+  After 5 wrong PINs an account locks for 5 minutes.
+- The owner logs in with username `owner` and the `STAFF_PASSWORD` from `.env` (always a manager),
+  and uses it to create everyone else's accounts.
+- Permissions are checked **on the server on every request** (`src/server/permissions.ts`); the desk only
+  hides buttons people can't use. Role changes and deactivation take effect immediately, and a PIN reset
+  or deactivation signs that person out everywhere.
+- Every order records who rang it up, who took payment and who refunded it.
+
 ## Design decisions
 
 | Decision | Why |
@@ -97,7 +128,9 @@ them. Unexpected errors are not.
 | Smallest free table that fits | Keeps big tables free for big groups. |
 | Customer cancel needs reference **and** phone, same error for both | References can't be guessed or probed. |
 | HttpOnly + SameSite=Strict session cookie, JSON-only writes | Blocks cross-site request forgery without CSRF tokens. |
-| Constant-time password check, login rate limit | No timing leaks or brute force. |
+| Constant-time password check, scrypt-hashed PINs, account lockout, login rate limit | No timing leaks or brute force. |
+| One permission table used by both the server and the "What each role can do" screen | The help screen can't drift from what's enforced. |
+| Options priced and "frozen" onto each order line | Later menu price changes don't rewrite old orders or reports. |
 | Server-Sent Events for the desk | Simple one-way live updates over plain HTTP. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
@@ -112,7 +145,8 @@ npm start
 ```
 
 - Customer chat: http://localhost:3000
-- Staff desk: http://localhost:3000/desk (business ID `bean-and-byte`, password from `.env`)
+- Staff desk: http://localhost:3000/desk. First log in with business ID `bean-and-byte`, username `owner`
+  and the `STAFF_PASSWORD` from `.env`, then add your team on the **Staff** tab
 
 Without `GEMINI_API_KEY` the chat runs in **offline mode**: keyword search, no AI-written answers,
 and bookings through the form only. Get a free key at https://aistudio.google.com/apikey.
@@ -122,7 +156,7 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 78 tests
+npm test                      # 97 tests
 npm run typecheck
 ```
 
@@ -146,8 +180,12 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 | `POST` | `/api/tenants/:id/chat` | Chat. Body `{ message, history }`; responds with an SSE stream (`sources`, `action`, `delta`, `done`) |
 | `GET` | `/api/tenants/:id/availability?date=&partySize=` | Free booking times |
 | `POST` | `/api/tenants/:id/bookings` | Book a table: `{ date, time, partySize, name, phone, notes? }` |
-| `POST` | `/api/desk/login`, `/api/desk/logout` | Staff session (cookie) |
-| `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue |
+| `POST` | `/api/tenants/:id/bookings/lookup`, `.../cancel` | Customer: `{ reference, phone }` |
+| `POST` | `/api/desk/login`, `/api/desk/logout` | Desk session (cookie): `{ tenantId, username, pin }` |
+| `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue; POST takes `items[].options`, `clientRef`, optional `payment` |
+| `POST` | `/api/desk/orders/:id/pay`, `/api/desk/orders/:id/refund` | Take payment `{ method, tendered? }`; refund `{ reason }` (manager) |
+| `GET` | `/api/desk/report?date=` | End-of-day report (manager) |
+| `GET`, `POST`, `PATCH` | `/api/desk/staff`, `/api/desk/staff/:id` | Staff accounts (manager) |
 | `GET`, `POST`, `PATCH` | `/api/desk/bookings`, `/api/desk/bookings/:id` | Bookings by day, status changes |
 | `GET`, `PATCH` | `/api/desk/menu`, `/api/desk/menu/:id` | Menu and sold-out flags |
 | `GET` | `/api/desk/events` | Live change events (SSE) |
@@ -158,8 +196,10 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 - [x] Streaming web chat, rate-limited API, offline mode
 - [x] Table bookings: rules engine, chat booking via function calling, booking form
 - [x] Staff desk: till, order queue, bookings, menu, live updates
-- [ ] Payments at the till (Stripe test mode first)
-- [ ] Per-staff accounts and roles instead of one shared password
+- [x] Drink options, cash/card payments, refunds, end-of-day report
+- [x] Staff accounts with roles (customer / staff / manager)
+- [ ] Integrated card payments (Stripe Terminal, test mode first)
+- [ ] Stock counts, menu & price editing in the desk, loyalty points
 - [ ] Deploy a live demo
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 - [ ] Customers order ahead through the chat

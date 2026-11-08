@@ -15,6 +15,25 @@ export interface MenuItemConfig {
   category: string;
   /** Price in cents. */
   price: number;
+  /** Ids of option groups (size, milk...) this item offers. */
+  options?: string[];
+}
+
+export interface OptionChoice {
+  id: string;
+  name: string;
+  /** Extra cost in cents (0 for free choices). */
+  price: number;
+  /** The pre-selected choice in a "single" group. */
+  default?: boolean;
+}
+
+/** "single" = pick exactly one (size, milk); "multi" = pick any (extra shot, iced). */
+export interface OptionGroup {
+  id: string;
+  name: string;
+  type: "single" | "multi";
+  choices: OptionChoice[];
 }
 
 export interface ShopConfig {
@@ -34,6 +53,7 @@ export interface ShopConfig {
   };
   tables: TableConfig[];
   menu: MenuItemConfig[];
+  optionGroups?: OptionGroup[];
 }
 
 /** Loads tenants/<id>/shop.json. Returns null when the tenant has no shop features. */
@@ -81,10 +101,30 @@ export function validateShopConfig(c: ShopConfig): void {
     if (!Number.isInteger(t.seats) || t.seats < 1) fail(`table ${t.id} needs seats >= 1`);
     ids.add(t.id);
   }
+  const groups = new Map<string, OptionGroup>();
+  for (const g of c.optionGroups ?? []) {
+    if (!/^[a-z0-9-]+$/.test(g.id) || groups.has(g.id)) fail(`duplicate or invalid option group id "${g.id}"`);
+    if (g.type !== "single" && g.type !== "multi") fail(`option group ${g.id} type must be "single" or "multi"`);
+    if (!g.choices?.length) fail(`option group ${g.id} needs at least one choice`);
+    const choiceIds = new Set<string>();
+    for (const ch of g.choices) {
+      if (!/^[a-z0-9-]+$/.test(ch.id) || choiceIds.has(ch.id)) fail(`duplicate or invalid choice "${ch.id}" in ${g.id}`);
+      if (!Number.isInteger(ch.price) || ch.price < 0) fail(`choice ${g.id}/${ch.id} needs a price in cents`);
+      choiceIds.add(ch.id);
+    }
+    const defaults = g.choices.filter((ch) => ch.default).length;
+    if (g.type === "single" && defaults !== 1) fail(`option group ${g.id} needs exactly one default choice`);
+    if (g.type === "multi" && defaults > 0) fail(`option group ${g.id} is multi-choice and can't have defaults`);
+    groups.set(g.id, g);
+  }
+
   const itemIds = new Set<string>();
   for (const m of c.menu) {
     if (!/^[a-z0-9-]+$/.test(m.id) || itemIds.has(m.id)) fail(`duplicate or invalid menu id "${m.id}"`);
     if (!Number.isInteger(m.price) || m.price < 0) fail(`menu item ${m.id} needs a price in cents`);
+    for (const groupId of m.options ?? []) {
+      if (!groups.has(groupId)) fail(`menu item ${m.id} uses unknown option group "${groupId}"`);
+    }
     itemIds.add(m.id);
   }
 }

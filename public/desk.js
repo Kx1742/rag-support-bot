@@ -1,5 +1,6 @@
-// Staff desk: till, kitchen display, bookings + table map, menu.
+// Staff desk: till, kitchen display, bookings + table map, menu, report, staff.
 // Built for a busy counter: big targets, glanceable states, live alerts.
+// What you see depends on your role; the server enforces the same rules on every request.
 // Plain JavaScript, no framework. All data is rendered as DOM nodes / text (never innerHTML).
 
 const $ = (id) => document.getElementById(id);
@@ -26,15 +27,18 @@ const BOOKING_SOON_MIN = 60;
 
 const state = {
   info: null,
+  perms: new Set(),
   tab: "till",
   now: { date: "", minutes: 0 },
   // till
   menu: [],
+  optionGroups: [],
   category: null,
   search: "",
-  ticket: new Map(), // itemId -> quantity
+  ticket: [], // [{ key, itemId, options: { group: id | ids }, qty, note }]
   orderType: "takeaway",
   orderTable: null,
+  pendingRef: null, // idempotency key: reused if the same order is retried
   lastSentAt: 0,
   // orders
   orders: [],
@@ -45,12 +49,17 @@ const state = {
   bookings: [],
   todayBookings: [],
   nb: { party: 2, tableId: "", time: null, walkIn: false },
+  // manager screens
+  reportDate: null,
+  report: null,
+  staff: null,
   // live
   events: null,
   sound: readPref("desk-sound", "on") === "on",
 };
 
 let money = (cents) => `$${(cents / 100).toFixed(2)}`;
+const can = (permission) => state.perms.has(permission);
 
 // ---------- API ----------
 
@@ -63,8 +72,8 @@ async function api(path, options = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== "/login") {
-    showLogin();
-    throw new Error("Please log in again");
+    showLogin(data.error);
+    throw new Error(data.error || "Please log in again");
   }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
@@ -83,41 +92,50 @@ async function start() {
   }
 }
 
-async function showLogin() {
+async function showLogin(message) {
   stopEvents();
+  for (const d of document.querySelectorAll("dialog[open]")) d.close();
   $("desk-view").hidden = true;
   $("login-view").hidden = false;
+  if (message && message !== "Please log in") $("login-error").textContent = message;
   if (!$("login-tenant").value) {
     const fromUrl = new URLSearchParams(location.search).get("tenant");
     const config = await fetch("/api/config").then((r) => r.json()).catch(() => ({}));
     $("login-tenant").value = fromUrl || config.defaultTenant || "";
   }
-  $("login-password").focus();
+  $("login-username").value = readPref("desk-last-user", "");
+  ($("login-username").value ? $("login-password") : $("login-username")).focus();
 }
 
 $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("login-error").textContent = "";
+  const username = $("login-username").value.trim().toLowerCase();
   try {
     state.info = await api("/login", {
       method: "POST",
-      body: { tenantId: $("login-tenant").value.trim(), password: $("login-password").value },
+      body: { tenantId: $("login-tenant").value.trim(), username, pin: $("login-password").value },
     });
     $("login-password").value = "";
+    writePref("desk-last-user", username === "owner" ? "" : username);
     await enterDesk();
   } catch (err) {
     $("login-error").textContent = err.message;
+    $("login-password").select();
   }
 });
 
 $("logout").addEventListener("click", async () => {
   await api("/logout", { method: "POST" }).catch(() => {});
   state.info = null;
+  writePref("desk-last-user", "");
+  resetTicket();
   showLogin();
 });
 
 async function enterDesk() {
   const info = state.info;
+  state.perms = new Set(info.permissions);
   const format = new Intl.NumberFormat(undefined, { style: "currency", currency: info.currency });
   money = (cents) => format.format(cents / 100);
 
@@ -125,10 +143,19 @@ async function enterDesk() {
   $("desk-view").hidden = false;
   $("desk-title").textContent = prettyName(info.tenantId);
   document.title = `Desk · ${prettyName(info.tenantId)}`;
+  $("user-chip").replaceChildren(info.user.name, h("b", { class: info.user.role }, info.user.role));
+  $("user-chip").title = `Logged in as ${info.user.name} (${info.user.role})`;
+
+  // Hide anything this role can't use. The server refuses it anyway.
+  for (const el of document.querySelectorAll("[data-perm]")) el.hidden = !can(el.dataset.perm);
+  if (!can(document.querySelector(`.nav [data-tab="${state.tab}"]`)?.dataset.perm ?? "till.use")) state.tab = "till";
+
   tick();
   state.bookingDate ??= state.now.date;
+  state.reportDate ??= state.now.date;
   renderSoundToggle();
   renderTableChips();
+  showTab(state.tab);
 
   await Promise.all([loadMenu(), loadOrders(), loadBookings()]);
   startEvents();
@@ -179,17 +206,19 @@ function showTab(tab) {
   for (const btn of document.querySelectorAll(".nav button")) btn.setAttribute("aria-selected", String(btn.dataset.tab === tab));
   for (const panel of document.querySelectorAll(".panel")) panel.hidden = panel.dataset.panel !== tab;
   if (tab === "till" && matchMedia("(min-width: 900px)").matches) $("item-search").focus({ preventScroll: true });
+  if (tab === "report") loadReport().catch((err) => toast(err.message, { tone: "error" }));
+  if (tab === "staff") loadStaff().catch((err) => toast(err.message, { tone: "error" }));
 }
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && state.tab === "till" && document.activeElement?.tagName !== "INPUT") {
+  if (e.key === "/" && state.tab === "till" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName) && !document.querySelector("dialog[open]")) {
     e.preventDefault();
     $("item-search").focus();
   }
   if (e.key === "Escape" && document.activeElement === $("item-search")) {
     $("item-search").value = "";
     state.search = "";
-    renderTill();
+    renderItems();
   }
 });
 
@@ -229,7 +258,10 @@ function onChange(change) {
   }
   if (change.order && Date.now() - state.lastSentAt > 3000) {
     chime();
-    toast(`New order #${pad(change.order.number)}`, { tone: "alert", action: { label: "View", run: () => showTab("orders") } });
+    toast(`New order #${pad(change.order.number)}${change.order.by ? ` from ${change.order.by}` : ""}`, {
+      tone: "alert",
+      action: { label: "View", run: () => showTab("orders") },
+    });
   }
   scheduleRefresh(change.kind);
 }
@@ -246,7 +278,10 @@ function scheduleRefresh(kind) {
     pending.clear();
     try {
       if (kinds.includes("menu")) await loadMenu();
-      if (kinds.includes("order")) await loadOrders();
+      if (kinds.includes("order")) {
+        await loadOrders();
+        if (state.tab === "report") await loadReport();
+      }
       if (kinds.includes("booking")) await loadBookings();
     } catch (err) {
       toast(err.message, { tone: "error" });
@@ -294,7 +329,7 @@ function renderSoundToggle() {
   $("sound-toggle").title = state.sound ? "Alert sound on (tap to mute)" : "Alert sound off (tap to unmute)";
 }
 
-// ---------- Till ----------
+// ---------- Till: menu ----------
 
 function categoryColor(category) {
   const categories = [...new Set(state.menu.map((m) => m.category))];
@@ -302,17 +337,17 @@ function categoryColor(category) {
 }
 
 async function loadMenu() {
-  state.menu = (await api("/menu")).menu;
+  const data = await api("/menu");
+  state.menu = data.menu;
+  state.optionGroups = data.optionGroups;
   const categories = [...new Set(state.menu.map((m) => m.category))];
   if (!categories.includes(state.category)) state.category = categories[0] ?? null;
-  let removed = 0;
-  for (const id of [...state.ticket.keys()]) {
-    if (!state.menu.find((m) => m.id === id && m.available)) {
-      state.ticket.delete(id);
-      removed++;
-    }
+  const before = state.ticket.length;
+  state.ticket = state.ticket.filter((line) => state.menu.some((m) => m.id === line.itemId && m.available));
+  if (state.ticket.length !== before) {
+    state.pendingRef = null;
+    toast("A sold-out item was removed from the current order.", { tone: "alert" });
   }
-  if (removed) toast("A sold-out item was removed from the current order.", { tone: "alert" });
   renderTill();
   renderMenuAdmin();
 }
@@ -359,20 +394,22 @@ function renderItems() {
   $("item-grid").replaceChildren(
     ...(items.length
       ? items.map((m) => {
-          const qty = state.ticket.get(m.id) ?? 0;
+          const qty = state.ticket.filter((l) => l.itemId === m.id).reduce((n, l) => n + l.qty, 0);
           return h(
             "button",
             {
               type: "button",
               class: `tile${qty ? " in-ticket" : ""}`,
-              disabled: !m.available,
+              disabled: !m.available || !can("till.use"),
               style: { "--cat": categoryColor(m.category) },
               "aria-label": `${m.name}, ${money(m.price)}${m.available ? "" : ", sold out"}${qty ? `, ${qty} in order` : ""}`,
-              onclick: () => addToTicket(m.id),
+              onclick: () => (m.options.length ? openOptions({ item: m }) : addLine(m.id, {}, 1, "")),
             },
             h("span", { class: "name" }, m.name),
             state.search ? h("span", { class: "cat-label" }, m.category) : null,
-            m.available ? h("span", { class: "price" }, money(m.price)) : h("span", { class: "sold-out" }, "Sold out"),
+            m.available
+              ? h("span", { class: "price" }, m.options.length ? `from ${money(m.price)}` : money(m.price))
+              : h("span", { class: "sold-out" }, "Sold out"),
             qty ? h("span", { class: "qty-badge", "aria-hidden": "true" }, String(qty)) : null,
           );
         })
@@ -380,54 +417,205 @@ function renderItems() {
   );
 }
 
-function addToTicket(id) {
-  state.ticket.set(id, Math.min((state.ticket.get(id) ?? 0) + 1, 50));
-  renderItems();
-  renderTicket(id);
+// ---------- Till: ticket lines & options ----------
+
+/** Price of one unit with the chosen options. */
+function unitPrice(item, options) {
+  let price = item.price;
+  for (const groupId of item.options) {
+    const group = state.optionGroups.find((g) => g.id === groupId);
+    const chosen = options[groupId];
+    for (const id of group.type === "single" ? [chosen ?? group.choices.find((c) => c.default).id] : chosen ?? []) {
+      price += group.choices.find((c) => c.id === id)?.price ?? 0;
+    }
+  }
+  return price;
 }
 
-function changeQty(id, delta) {
-  const qty = (state.ticket.get(id) ?? 0) + delta;
-  if (qty <= 0) state.ticket.delete(id);
-  else state.ticket.set(id, Math.min(qty, 50));
+/** "Large · Oat milk · Extra shot" (defaults like Regular / Whole milk are left out). */
+function optionsLabel(item, options) {
+  const names = [];
+  for (const groupId of item.options) {
+    const group = state.optionGroups.find((g) => g.id === groupId);
+    const chosen = options[groupId];
+    const ids = group.type === "single" ? (chosen ? [chosen] : []) : chosen ?? [];
+    for (const id of ids) {
+      const choice = group.choices.find((c) => c.id === id);
+      if (choice && !choice.default) names.push(choice.name);
+    }
+  }
+  return names.join(" · ");
+}
+
+function lineKey(itemId, options, note) {
+  return JSON.stringify([itemId, Object.entries(options).sort(), note]);
+}
+
+/** Adds to the ticket, merging with an identical line (same item, options and note). */
+function addLine(itemId, options, qty, note) {
+  const key = lineKey(itemId, options, note);
+  const existing = state.ticket.find((l) => l.key === key);
+  if (existing) existing.qty = Math.min(existing.qty + qty, 50);
+  else state.ticket.push({ key, itemId, options, qty, note });
+  state.pendingRef = null;
+  renderItems();
+  renderTicket(key);
+}
+
+function changeQty(key, delta) {
+  const line = state.ticket.find((l) => l.key === key);
+  if (!line) return;
+  line.qty = Math.min(line.qty + delta, 50);
+  if (line.qty <= 0) state.ticket = state.ticket.filter((l) => l !== line);
+  state.pendingRef = null;
   renderItems();
   renderTicket();
 }
 
-function renderTicket(flashId) {
-  const lines = [...state.ticket]
-    .map(([id, qty]) => ({ item: state.menu.find((m) => m.id === id), qty }))
-    .filter((l) => l.item);
+function renderTicket(flashKey) {
+  const lines = state.ticket.map((line) => ({ line, item: state.menu.find((m) => m.id === line.itemId) })).filter((l) => l.item);
 
   $("ticket-lines").replaceChildren(
-    ...lines.map(({ item, qty }) =>
-      h(
+    ...lines.map(({ line, item }) => {
+      const label = optionsLabel(item, line.options);
+      const price = unitPrice(item, line.options);
+      return h(
         "li",
-        { class: item.id === flashId ? "flash" : "" },
-        h("span", { class: "line-name" }, item.name),
-        h("strong", { class: "line-total" }, money(item.price * qty)),
+        { class: line.key === flashKey ? "flash" : "" },
+        h(
+          "button",
+          { type: "button", class: "line-name", title: "Change options", onclick: () => openOptions({ item, line }) },
+          item.name,
+          label ? h("small", {}, label) : null,
+          line.note ? h("em", {}, line.note) : null,
+        ),
+        h("strong", { class: "line-total" }, money(price * line.qty)),
         h(
           "div",
           { class: "qty" },
-          h("button", { type: "button", "aria-label": `One less ${item.name}`, onclick: () => changeQty(item.id, -1) }, "−"),
-          h("output", { "aria-label": "Quantity" }, String(qty)),
-          h("button", { type: "button", "aria-label": `One more ${item.name}`, onclick: () => changeQty(item.id, 1) }, "+"),
-          h("button", { type: "button", class: "remove", onclick: () => changeQty(item.id, -qty) }, "Remove"),
+          h("button", { type: "button", "aria-label": `One less ${item.name}`, onclick: () => changeQty(line.key, -1) }, "−"),
+          h("output", { "aria-label": "Quantity" }, String(line.qty)),
+          h("button", { type: "button", "aria-label": `One more ${item.name}`, onclick: () => changeQty(line.key, 1) }, "+"),
+          h("button", { type: "button", class: "remove", onclick: () => changeQty(line.key, -line.qty) }, "Remove"),
         ),
-      ),
-    ),
+      );
+    }),
   );
-  const count = lines.reduce((n, l) => n + l.qty, 0);
-  const total = lines.reduce((sum, l) => sum + l.item.price * l.qty, 0);
+  const count = lines.reduce((n, l) => n + l.line.qty, 0);
+  const total = ticketTotal();
   $("ticket-count").textContent = `${count} item${count === 1 ? "" : "s"}`;
   $("ticket-total").textContent = money(total);
   $("empty-ticket").hidden = lines.length > 0;
   $("ticket-lines").hidden = lines.length === 0;
 
   const needsTable = state.orderType === "dine_in" && !state.orderTable;
-  $("send-order").disabled = lines.length === 0 || needsTable;
-  $("send-order").textContent = lines.length === 0 ? "Send to kitchen" : needsTable ? "Choose a table" : `Send to kitchen · ${money(total)}`;
+  const blocked = lines.length === 0 || needsTable;
+  $("charge-order").disabled = blocked;
+  $("send-order").disabled = blocked;
+  $("charge-order").textContent = lines.length === 0 ? "Charge" : needsTable ? "Choose a table" : `Charge ${money(total)}`;
+  $("send-order").textContent = state.orderType === "dine_in" ? "Send to kitchen, pay later" : "Send without paying";
 }
+
+function ticketTotal() {
+  return state.ticket.reduce((sum, line) => {
+    const item = state.menu.find((m) => m.id === line.itemId);
+    return item ? sum + unitPrice(item, line.options) * line.qty : sum;
+  }, 0);
+}
+
+// Options sheet: size, milk, extras. Defaults are pre-selected so "Add" works in one tap.
+const optDialog = $("options-dialog");
+let optState = null;
+
+function openOptions({ item, line = null }) {
+  const options = {};
+  for (const groupId of item.options) {
+    const group = state.optionGroups.find((g) => g.id === groupId);
+    options[groupId] = group.type === "single" ? line?.options[groupId] ?? group.choices.find((c) => c.default).id : [...(line?.options[groupId] ?? [])];
+  }
+  optState = { item, line, options, qty: line?.qty ?? 1 };
+  $("opt-title").textContent = item.name;
+  $("opt-base").textContent = money(item.price);
+  $("opt-note").value = line?.note ?? "";
+  $("opt-remove").hidden = !line;
+  renderOptions();
+  optDialog.showModal();
+  $("opt-submit").focus();
+}
+
+function renderOptions() {
+  const { item, options } = optState;
+  $("opt-groups").replaceChildren(
+    ...item.options.map((groupId) => {
+      const group = state.optionGroups.find((g) => g.id === groupId);
+      return h(
+        "section",
+        { class: "opt-group" },
+        h("h3", {}, group.name, h("span", {}, group.type === "single" ? "Pick one" : "Optional")),
+        h(
+          "div",
+          { class: "choices", role: group.type === "single" ? "radiogroup" : "group", "aria-label": group.name },
+          ...group.choices.map((choice) => {
+            const selected = group.type === "single" ? options[groupId] === choice.id : options[groupId].includes(choice.id);
+            return h(
+              "button",
+              {
+                type: "button",
+                role: group.type === "single" ? "radio" : "checkbox",
+                "aria-checked": String(selected),
+                onclick: () => {
+                  if (group.type === "single") options[groupId] = choice.id;
+                  else options[groupId] = selected ? options[groupId].filter((id) => id !== choice.id) : [...options[groupId], choice.id];
+                  renderOptions();
+                },
+              },
+              choice.name,
+              h("small", {}, choice.price ? `+${money(choice.price)}` : "free"),
+            );
+          }),
+        ),
+      );
+    }),
+  );
+  $("opt-qty").textContent = String(optState.qty);
+  const total = unitPrice(item, cleanOptions(item, options)) * optState.qty;
+  $("opt-submit").textContent = `${optState.line ? "Update" : "Add"} · ${money(total)}`;
+}
+
+/** Drops empty multi-groups and default singles so identical drinks merge into one line. */
+function cleanOptions(item, options) {
+  const out = {};
+  for (const groupId of item.options) {
+    const group = state.optionGroups.find((g) => g.id === groupId);
+    const value = options[groupId];
+    if (group.type === "single" && value !== group.choices.find((c) => c.default).id) out[groupId] = value;
+    if (group.type === "multi" && value.length) out[groupId] = [...value].sort();
+  }
+  return out;
+}
+
+$("opt-minus").addEventListener("click", () => {
+  optState.qty = Math.max(1, optState.qty - 1);
+  renderOptions();
+});
+$("opt-plus").addEventListener("click", () => {
+  optState.qty = Math.min(50, optState.qty + 1);
+  renderOptions();
+});
+$("opt-close").addEventListener("click", () => optDialog.close());
+$("opt-remove").addEventListener("click", () => {
+  changeQty(optState.line.key, -optState.line.qty);
+  optDialog.close();
+});
+$("options-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const { item, line, options, qty } = optState;
+  if (line) state.ticket = state.ticket.filter((l) => l !== line);
+  addLine(item.id, cleanOptions(item, options), qty, $("opt-note").value.trim());
+  optDialog.close();
+});
+
+// ---------- Till: order type, sending & charging ----------
 
 for (const btn of document.querySelectorAll("#order-type button")) {
   btn.addEventListener("click", () => {
@@ -440,6 +628,7 @@ for (const btn of document.querySelectorAll("#order-type button")) {
 }
 
 function renderTableChips() {
+  if (!state.info) return;
   $("table-chips").replaceChildren(
     ...state.info.tables.map((t) =>
       h(
@@ -461,40 +650,170 @@ function renderTableChips() {
   );
 }
 
-$("clear-ticket").addEventListener("click", clearTicket);
+$("clear-ticket").addEventListener("click", () => {
+  resetTicket();
+  renderItems();
+  renderTicket();
+});
 
-function clearTicket() {
-  state.ticket.clear();
+function resetTicket() {
+  state.ticket = [];
   state.orderTable = null;
+  state.pendingRef = null;
   $("order-name").value = "";
   $("order-notes").value = "";
   $("ticket-error").textContent = "";
   renderTableChips();
+}
+
+function orderBody(payment) {
+  // One idempotency key per ticket: a retry after a network error can't create a second order.
+  state.pendingRef ??= crypto.randomUUID();
+  return {
+    clientRef: state.pendingRef,
+    type: state.orderType,
+    tableId: state.orderType === "dine_in" ? state.orderTable : null,
+    customerName: $("order-name").value,
+    notes: $("order-notes").value,
+    items: state.ticket.map((l) => ({ itemId: l.itemId, quantity: l.qty, note: l.note, options: l.options })),
+    payment,
+  };
+}
+
+async function submitOrder(payment) {
+  $("ticket-error").textContent = "";
+  state.lastSentAt = Date.now();
+  const { order } = await api("/orders", { method: "POST", body: orderBody(payment) });
+  const change = order.payment.change;
+  toast(
+    payment
+      ? `Order #${pad(order.number)} paid${payment.method === "cash" && change ? ` · change ${money(change)}` : ""} · sent to the kitchen`
+      : `Order #${pad(order.number)} sent to the kitchen · ${money(order.total)} unpaid`,
+    { tone: "success" },
+  );
+  resetTicket();
   renderItems();
   renderTicket();
+  await loadOrders();
+  return order;
 }
 
 $("send-order").addEventListener("click", async () => {
-  $("ticket-error").textContent = "";
   $("send-order").disabled = true;
-  state.lastSentAt = Date.now();
   try {
-    const { order } = await api("/orders", {
-      method: "POST",
-      body: {
-        type: state.orderType,
-        tableId: state.orderType === "dine_in" ? state.orderTable : null,
-        customerName: $("order-name").value,
-        notes: $("order-notes").value,
-        items: [...state.ticket].map(([itemId, quantity]) => ({ itemId, quantity })),
-      },
-    });
-    toast(`Order #${pad(order.number)} sent to the kitchen · ${money(order.total)}`, { tone: "success" });
-    clearTicket();
-    await loadOrders();
+    await submitOrder(undefined);
   } catch (err) {
     $("ticket-error").textContent = err.message;
     renderTicket();
+  }
+});
+
+$("charge-order").addEventListener("click", () => {
+  openPayment({
+    title: "Charge new order",
+    total: ticketTotal(),
+    pay: (payment) => submitOrder(payment),
+  });
+});
+
+// Payment sheet: cash with quick amounts and change due, or card confirmed from the card machine.
+const payDialog = $("pay-dialog");
+let payState = null;
+
+function openPayment({ title, total, pay }) {
+  payState = { total, pay, method: "cash", tendered: null };
+  $("pay-title").textContent = title;
+  $("pay-total").textContent = money(total);
+  $("pay-tendered").value = "";
+  $("pay-error").textContent = "";
+  setPayMethod("cash");
+  renderQuickCash();
+  renderChange();
+  payDialog.showModal();
+}
+
+function setPayMethod(method) {
+  payState.method = method;
+  for (const b of document.querySelectorAll("#pay-method button")) b.setAttribute("aria-checked", String(b.dataset.method === method));
+  $("pay-cash").hidden = method !== "cash";
+  $("pay-card").hidden = method !== "card";
+  renderChange();
+}
+
+for (const b of document.querySelectorAll("#pay-method button")) b.addEventListener("click", () => setPayMethod(b.dataset.method));
+
+/** Exact amount plus the next round notes customers usually hand over. */
+function renderQuickCash() {
+  const total = payState.total;
+  const amounts = new Set([total]);
+  for (const step of [500, 1000, 2000, 5000, 10000]) amounts.add(Math.ceil(total / step) * step);
+  const sorted = [...amounts].filter((a) => a >= total).sort((a, b) => a - b).slice(0, 5);
+  $("pay-quick").replaceChildren(
+    ...sorted.map((amount) =>
+      h(
+        "button",
+        {
+          type: "button",
+          role: "radio",
+          "aria-checked": String(payState.tendered === amount),
+          onclick: () => {
+            payState.tendered = amount;
+            $("pay-tendered").value = "";
+            renderQuickCash();
+            renderChange();
+          },
+        },
+        amount === total ? "Exact" : money(amount),
+      ),
+    ),
+  );
+}
+
+$("pay-tendered").addEventListener("input", (e) => {
+  const value = Number(String(e.target.value).replace(/[^0-9.]/g, ""));
+  payState.tendered = e.target.value.trim() && Number.isFinite(value) ? Math.round(value * 100) : null;
+  renderQuickCash();
+  renderChange();
+});
+
+function renderChange() {
+  if (!payState) return;
+  const box = $("pay-change");
+  if (payState.method === "card") {
+    $("pay-submit").disabled = false;
+    $("pay-submit").textContent = `Card approved · ${money(payState.total)}`;
+    return;
+  }
+  const t = payState.tendered;
+  $("pay-submit").textContent = "Complete payment";
+  if (t === null) {
+    box.className = "change-due";
+    box.replaceChildren("Choose the cash given");
+    $("pay-submit").disabled = true;
+  } else if (t < payState.total) {
+    box.className = "change-due short";
+    box.replaceChildren("Short by", h("strong", {}, money(payState.total - t)));
+    $("pay-submit").disabled = true;
+  } else {
+    box.className = "change-due ok";
+    box.replaceChildren("Change due", h("strong", {}, money(t - payState.total)));
+    $("pay-submit").disabled = false;
+  }
+}
+
+$("pay-close").addEventListener("click", () => payDialog.close());
+$("pay-cancel").addEventListener("click", () => payDialog.close());
+$("pay-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("pay-error").textContent = "";
+  $("pay-submit").disabled = true;
+  try {
+    const payment = payState.method === "cash" ? { method: "cash", tendered: payState.tendered } : { method: "card" };
+    await payState.pay(payment);
+    payDialog.close();
+  } catch (err) {
+    $("pay-error").textContent = err.message;
+    renderChange();
   }
 });
 
@@ -520,11 +839,12 @@ function renderOrders() {
   const open = state.orders.filter((o) => o.status === "new" || o.status === "preparing");
   const longest = Math.max(0, ...open.map((o) => ageMinutes(o.createdAt)));
 
+  // Staff see workload; managers also see the money.
   $("order-stats").replaceChildren(
     stat(String(s.open), "open orders"),
     stat(open.length ? `${longest} min` : "–", "longest wait", longest >= ORDER_LATE_MIN ? "late" : ""),
-    stat(String(s.orders), "orders today"),
-    stat(money(s.sales), "sales today"),
+    stat(String(s.unpaid), "unpaid", s.unpaid ? "warn" : ""),
+    s.sales !== undefined ? stat(money(s.sales), "paid sales today") : stat(String(s.orders), "orders today"),
   );
 
   const seen = state.seenOrderIds;
@@ -547,6 +867,14 @@ function renderOrders() {
   $("badge-orders").hidden = s.open === 0;
 }
 
+function paymentChip(o) {
+  const p = o.payment;
+  if (p.status === "paid") return h("span", { class: "chip paid" }, `Paid · ${p.method}`);
+  if (p.status === "refunded") return h("span", { class: "chip refunded" }, "Refunded");
+  if (o.status === "cancelled") return null;
+  return h("span", { class: "chip unpaid" }, "Unpaid");
+}
+
 function orderCard(o, isNew) {
   const table = o.tableId ? state.info.tables.find((t) => t.id === o.tableId)?.name ?? o.tableId : null;
   const age = ageMinutes(o.createdAt);
@@ -554,6 +882,48 @@ function orderCard(o, isNew) {
   const timerClass = age >= ORDER_LATE_MIN ? "late" : age >= ORDER_WARN_MIN ? "warn" : "ok";
   const next = NEXT_STEP[o.status];
   const lane = { new: "var(--new)", preparing: "var(--prep)", ready: "var(--ready)" }[o.status];
+  const unpaid = o.payment.status === "unpaid" && o.status !== "cancelled";
+
+  const actions = [];
+  if (next && can("orders.manage")) {
+    actions.push(h("button", { type: "button", class: `btn btn-go ${next.class}`, onclick: () => setOrderStatus(o, next.status) }, next.label));
+  }
+  if (unpaid && can("payments.take")) {
+    actions.push(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-pay btn-sm",
+          onclick: () =>
+            openPayment({
+              title: `Take payment · #${pad(o.number)}`,
+              total: o.total,
+              pay: async (payment) => {
+                const { order } = await api(`/orders/${o.id}/pay`, { method: "POST", body: payment });
+                toast(
+                  `#${pad(order.number)} paid${payment.method === "cash" && order.payment.change ? ` · change ${money(order.payment.change)}` : ""}`,
+                  { tone: "success" },
+                );
+                await loadOrders();
+              },
+            }),
+        },
+        "Take payment",
+      ),
+    );
+  }
+  if (STEP_BACK[o.status] && can("orders.manage")) {
+    actions.push(
+      h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => setOrderStatus(o, STEP_BACK[o.status]) }, o.status === "completed" ? "Undo" : "Back"),
+    );
+  }
+  if (active && o.payment.status === "unpaid" && can("orders.manage")) {
+    actions.push(armButton("Cancel", `order-cancel-${o.id}`, () => setOrderStatus(o, "cancelled")));
+  }
+  if (o.payment.status === "paid" && can("payments.refund")) {
+    actions.push(h("button", { type: "button", class: "btn btn-danger btn-sm", onclick: () => openRefund(o) }, "Refund"));
+  }
 
   return h(
     "article",
@@ -568,22 +938,23 @@ function orderCard(o, isNew) {
         : h("span", { class: "chip timer" }, o.status === "completed" ? "Done" : "Cancelled"),
     ),
     o.customerName ? h("div", { class: "order-who" }, o.customerName) : null,
-    h("ul", { class: "order-items" }, ...o.items.map((l) => h("li", {}, h("b", {}, `${l.quantity}×`), ` ${l.name}`))),
+    h(
+      "ul",
+      { class: "order-items" },
+      ...o.items.map((l) =>
+        h("li", {}, h("b", {}, `${l.quantity}×`), ` ${l.name}`, l.optionsLabel ? h("small", {}, l.optionsLabel) : null, l.note ? h("em", {}, l.note) : null),
+      ),
+    ),
     o.notes ? h("div", { class: "note" }, o.notes) : null,
-    h("div", { class: "order-total" }, money(o.total)),
     h(
       "div",
-      { class: "card-actions" },
-      next
-        ? h("button", { type: "button", class: `btn btn-go ${next.class}`, onclick: () => setOrderStatus(o, next.status) }, next.label)
-        : null,
-      STEP_BACK[o.status]
-        ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => setOrderStatus(o, STEP_BACK[o.status]) }, o.status === "completed" ? "Undo" : "Back")
-        : null,
-      active
-        ? armButton("Cancel", `order-cancel-${o.id}`, () => setOrderStatus(o, "cancelled"))
-        : null,
+      { class: "order-meta" },
+      h("strong", {}, money(o.total)),
+      paymentChip(o),
+      o.createdBy ? h("span", {}, `by ${o.createdBy}`) : null,
+      o.payment.status === "refunded" ? h("span", {}, `refunded by ${o.payment.refundedBy}: ${o.payment.refundReason}`) : null,
     ),
+    actions.length ? h("div", { class: "card-actions" }, ...actions) : null,
   );
 }
 
@@ -596,9 +967,43 @@ async function setOrderStatus(order, status) {
   }
 }
 
+// Refunds (managers only; the server checks too).
+const refundDialog = $("refund-dialog");
+let refundOrder = null;
+const REFUND_REASONS = ["Wrong order", "Customer changed mind", "Quality issue", "Charged twice"];
+
+function openRefund(order) {
+  refundOrder = order;
+  $("refund-summary").textContent = `Order #${pad(order.number)} · ${money(order.total)} paid by ${order.payment.method}. The order will be cancelled.`;
+  $("refund-reason").value = "";
+  $("refund-error").textContent = "";
+  $("refund-reasons").replaceChildren(
+    ...REFUND_REASONS.map((r) => h("button", { type: "button", onclick: () => ($("refund-reason").value = r) }, r)),
+  );
+  refundDialog.showModal();
+}
+
+$("refund-close").addEventListener("click", () => refundDialog.close());
+$("refund-cancel").addEventListener("click", () => refundDialog.close());
+$("refund-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("refund-error").textContent = "";
+  try {
+    await api(`/orders/${refundOrder.id}/refund`, { method: "POST", body: { reason: $("refund-reason").value } });
+    refundDialog.close();
+    toast(`#${pad(refundOrder.number)} refunded · ${money(refundOrder.total)}${refundOrder.payment.method === "cash" ? " cash back" : " to card"}`, {
+      tone: "success",
+    });
+    await loadOrders();
+  } catch (err) {
+    $("refund-error").textContent = err.message;
+  }
+});
+
 // ---------- Bookings ----------
 
 async function loadBookings() {
+  if (!can("bookings.manage")) return;
   const today = state.now.date;
   const [viewed, todays] = await Promise.all([
     api(`/bookings?date=${state.bookingDate}`),
@@ -621,7 +1026,7 @@ function bookingPhase(b, isToday) {
 }
 
 function renderBookings() {
-  if (!state.info) return;
+  if (!state.info || !can("bookings.manage")) return;
   const today = state.now.date;
   const isToday = state.bookingDate === today;
   $("booking-date").value = state.bookingDate;
@@ -632,7 +1037,6 @@ function renderBookings() {
   const people = active.reduce((n, b) => n + b.partySize, 0);
   $("booking-stats").textContent = `${active.length} booking${active.length === 1 ? "" : "s"} · ${people} ${people === 1 ? "person" : "people"}`;
 
-  // Table map only makes sense for today.
   $("floor-section").hidden = !isToday;
   if (isToday) renderFloor();
 
@@ -676,7 +1080,6 @@ function renderBookings() {
   }
   $("booking-sections").replaceChildren(...sections.filter(Boolean));
 
-  // Badge: guests who are late or due within the hour.
   const attention = state.todayBookings.filter((b) => ["late", "soon"].includes(bookingPhase(b, true))).length;
   $("badge-bookings").textContent = String(attention);
   $("badge-bookings").hidden = attention === 0;
@@ -720,12 +1123,7 @@ function bookingCard(b, isToday) {
       h("div", { class: "b-name" }, b.name),
       h("div", { class: "b-chips" }, ...chips),
       b.notes ? h("div", { class: "note" }, b.notes) : null,
-      h(
-        "div",
-        { class: "b-meta" },
-        b.phone ? h("a", { href: `tel:${b.phone}` }, b.phone) : "No phone",
-        ` · ${b.reference} · via ${b.source}`,
-      ),
+      h("div", { class: "b-meta" }, b.phone ? h("a", { href: `tel:${b.phone}` }, b.phone) : "No phone", ` · ${b.reference} · via ${b.source}`),
     ),
     h("div", { class: "b-actions" }, ...actions),
   );
@@ -766,14 +1164,10 @@ function renderFloor() {
         h("span", { class: "t-name" }, shortTable(t.name), h("span", { class: "t-seats" }, `${t.seats} seats`)),
         h("span", { class: "t-state" }, label),
         h("span", { class: "t-detail" }, detail),
-        ...orders.map((o) => h("span", { class: "t-detail" }, `Order #${pad(o.number)} · ${o.status}`)),
+        ...orders.map((o) => h("span", { class: "t-detail" }, `Order #${pad(o.number)} · ${o.status}${o.payment.status === "unpaid" ? " · unpaid" : ""}`)),
       ];
       return kind === "free"
-        ? h(
-            "button",
-            { type: "button", class: "table-card free", title: "Seat a walk-in here", onclick: () => openBookingDialog({ tableId: t.id, walkIn: true }) },
-            ...content,
-          )
+        ? h("button", { type: "button", class: "table-card free", title: "Seat a walk-in here", onclick: () => openBookingDialog({ tableId: t.id, walkIn: true }) }, ...content)
         : h("div", { class: `table-card ${kind}` }, ...content);
     }),
   );
@@ -797,14 +1191,12 @@ $("booking-date").addEventListener("change", (e) => e.target.value && setBooking
 $("prev-day").addEventListener("click", () => setBookingDate(shiftDate(state.bookingDate, -1)));
 $("next-day").addEventListener("click", () => setBookingDate(shiftDate(state.bookingDate, 1)));
 $("today-btn").addEventListener("click", () => setBookingDate(state.now.date));
-$("day-title").addEventListener("click", () => $("booking-date").showPicker?.());
 
-// ---------- New booking dialog (phone bookings & walk-ins) ----------
-
-const dialog = $("booking-dialog");
+// New booking dialog (phone bookings & walk-ins)
+const bookingDialog = $("booking-dialog");
 $("new-booking-btn").addEventListener("click", () => openBookingDialog());
-$("nb-close").addEventListener("click", () => dialog.close());
-$("nb-cancel").addEventListener("click", () => dialog.close());
+$("nb-close").addEventListener("click", () => bookingDialog.close());
+$("nb-cancel").addEventListener("click", () => bookingDialog.close());
 $("nb-date").addEventListener("change", loadTimes);
 $("nb-party-minus").addEventListener("click", () => setParty(state.nb.party - 1));
 $("nb-party-plus").addEventListener("click", () => setParty(state.nb.party + 1));
@@ -821,7 +1213,7 @@ function openBookingDialog({ tableId = "", walkIn = false } = {}) {
   $("nb-submit").textContent = walkIn ? "Seat now" : "Create booking";
   $("nb-party").textContent = String(state.nb.party);
   renderNbTables();
-  dialog.showModal();
+  bookingDialog.showModal();
   loadTimes();
   if (!walkIn) $("nb-name").focus();
 }
@@ -909,11 +1301,9 @@ $("booking-form").addEventListener("submit", async (e) => {
       },
     });
     if (state.nb.walkIn) await api(`/bookings/${booking.id}`, { method: "PATCH", body: { status: "seated" } });
-    dialog.close();
+    bookingDialog.close();
     toast(
-      state.nb.walkIn
-        ? `${booking.name} seated at ${shortTable(booking.tableName)}`
-        : `Booked ${booking.name} · ${dayName(booking.date)} ${booking.time} · ${shortTable(booking.tableName)}`,
+      state.nb.walkIn ? `${booking.name} seated at ${shortTable(booking.tableName)}` : `Booked ${booking.name} · ${dayName(booking.date)} ${booking.time} · ${shortTable(booking.tableName)}`,
       { tone: "success" },
     );
     setBookingDate(booking.date);
@@ -935,7 +1325,7 @@ function renderMenuAdmin() {
   $("restock-all").replaceWith(
     Object.assign(armButton("Mark all available", "restock-all", restockAll, { armedLabel: "Tap to confirm", className: "btn btn-ghost btn-sm" }), {
       id: "restock-all",
-      hidden: soldOut.length === 0,
+      hidden: soldOut.length === 0 || !can("menu.soldOut"),
     }),
   );
   $("badge-menu").textContent = String(soldOut.length);
@@ -953,7 +1343,14 @@ function renderMenuAdmin() {
           .map((m) =>
             h(
               "button",
-              { type: "button", class: "menu-row", role: "switch", "aria-checked": String(m.available), onclick: () => setAvailable(m, !m.available) },
+              {
+                type: "button",
+                class: "menu-row",
+                role: "switch",
+                "aria-checked": String(m.available),
+                disabled: !can("menu.soldOut"),
+                onclick: () => setAvailable(m, !m.available),
+              },
               h("span", {}, h("span", { class: "m-name" }, m.name), " ", h("span", { class: "m-price" }, money(m.price))),
               h("span", { class: "m-state" }, m.available ? "Available" : "Sold out"),
               h("span", { class: "switch", "aria-hidden": "true" }),
@@ -983,6 +1380,248 @@ async function restockAll() {
     toast(err.message, { tone: "error" });
   }
 }
+
+// ---------- Report (managers) ----------
+
+async function loadReport() {
+  if (!can("reports.view")) return;
+  state.report = await api(`/report?date=${state.reportDate}`);
+  renderReport();
+}
+
+function renderReport() {
+  const r = state.report;
+  const s = r.summary;
+  $("report-date").value = r.date;
+  $("report-title").textContent = r.date === state.now.date ? "Today" : dayName(r.date);
+  $("report-next").disabled = r.date >= state.now.date;
+
+  $("report-stats").replaceChildren(
+    stat(money(s.sales), "paid sales"),
+    stat(String(s.orders), "orders"),
+    stat(money(r.averageOrder), "average order"),
+    stat(String(s.items), "items sold"),
+    stat(money(s.cash), "cash (expected in drawer)"),
+    stat(money(s.card), "card"),
+    stat(money(s.unpaidTotal), `unpaid (${s.unpaid})`, s.unpaid ? "warn" : ""),
+    stat(money(s.refunds), "refunded", s.refunds ? "late" : ""),
+  );
+
+  $("report-items").replaceChildren(
+    r.items.length
+      ? h(
+          "table",
+          { class: "report-table" },
+          h("thead", {}, h("tr", {}, h("th", {}, "Item"), h("th", {}, "Sold"), h("th", {}, "Sales"))),
+          h("tbody", {}, ...r.items.map((i) => h("tr", {}, h("td", {}, i.name), h("td", {}, String(i.quantity)), h("td", {}, money(i.sales))))),
+        )
+      : h("p", { class: "empty-note" }, "No paid sales yet."),
+  );
+
+  const max = Math.max(1, ...r.hours.map((x) => x.sales));
+  $("report-hours").replaceChildren(
+    ...(r.hours.length
+      ? r.hours.map((x) =>
+          h(
+            "div",
+            { class: "hour-row" },
+            h("span", {}, `${String(x.hour).padStart(2, "0")}:00`),
+            h("span", { class: "bar", title: `${x.orders} orders` }, h("i", { style: { width: `${Math.max(3, (x.sales / max) * 100)}%` } })),
+            h("span", {}, money(x.sales)),
+          ),
+        )
+      : [h("p", { class: "empty-note" }, "No paid sales yet.")]),
+  );
+
+  $("report-refunds-block").hidden = r.refunds.length === 0;
+  $("report-refunds").replaceChildren(
+    h(
+      "table",
+      { class: "report-table" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Order"), h("th", {}, "Reason"), h("th", {}, "By"), h("th", {}, "Amount"))),
+      h("tbody", {}, ...r.refunds.map((x) => h("tr", {}, h("td", {}, `#${pad(x.number)}`), h("td", {}, x.reason ?? ""), h("td", {}, x.by ?? ""), h("td", {}, money(x.total))))),
+    ),
+  );
+}
+
+function setReportDate(date) {
+  state.reportDate = date;
+  loadReport().catch((err) => toast(err.message, { tone: "error" }));
+}
+
+$("report-date").addEventListener("change", (e) => e.target.value && setReportDate(e.target.value));
+$("report-prev").addEventListener("click", () => setReportDate(shiftDate(state.reportDate, -1)));
+$("report-next").addEventListener("click", () => setReportDate(shiftDate(state.reportDate, 1)));
+$("report-csv").addEventListener("click", () => {
+  const r = state.report;
+  if (!r) return;
+  const cents = (n) => (n / 100).toFixed(2);
+  const rows = [
+    ["Report", r.date],
+    ["Paid sales", cents(r.summary.sales)],
+    ["Cash", cents(r.summary.cash)],
+    ["Card", cents(r.summary.card)],
+    ["Unpaid", cents(r.summary.unpaidTotal)],
+    ["Refunded", cents(r.summary.refunds)],
+    [],
+    ["Item", "Quantity", "Sales"],
+    ...r.items.map((i) => [i.name, i.quantity, cents(i.sales)]),
+  ];
+  const csv = rows.map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const link = h("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: `sales-${r.date}.csv` });
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
+
+// ---------- Staff accounts (managers) ----------
+
+async function loadStaff() {
+  if (!can("staff.manage")) return;
+  state.staff = await api("/staff");
+  renderStaff();
+}
+
+function renderStaff() {
+  const { staff, ownerLogin, rolePermissions, permissionLabels } = state.staff;
+  const active = staff.filter((s) => s.active);
+  $("staff-summary").textContent = `${active.length} active account${active.length === 1 ? "" : "s"}${ownerLogin ? " · the owner login (username \"owner\") is also on" : ""}. Everyone logs in with their own username and PIN.`;
+
+  $("staff-list").replaceChildren(
+    ...(staff.length
+      ? staff.map((m) => {
+          const isMe = m.username === state.info.user.username;
+          const actions = [
+            h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => openStaffDialog({ mode: "pin", member: m }) }, "Reset PIN"),
+          ];
+          if (!isMe && m.active) {
+            const otherRole = m.role === "manager" ? "staff" : "manager";
+            actions.push(
+              armButton(otherRole === "manager" ? "Make manager" : "Make staff", `staff-role-${m.id}`, () => updateStaff(m, { role: otherRole }), {
+                armedLabel: "Tap to confirm",
+                className: "btn btn-ghost btn-sm",
+              }),
+            );
+            actions.push(armButton("Deactivate", `staff-off-${m.id}`, () => updateStaff(m, { active: false }), { armedLabel: "Tap to confirm" }));
+          }
+          if (!m.active) actions.push(h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => updateStaff(m, { active: true }) }, "Reactivate"));
+          return h(
+            "article",
+            { class: `staff-row${m.active ? "" : " inactive"}` },
+            h("span", { class: "avatar", "aria-hidden": "true" }, initials(m.name)),
+            h(
+              "div",
+              { class: "who" },
+              h("strong", {}, m.name, isMe ? " (you)" : ""),
+              h("span", {}, `@${m.username}`, " · ", h("span", { class: `chip role-${m.role}` }, m.role), m.active ? "" : " · deactivated"),
+            ),
+            h("div", { class: "actions" }, ...actions),
+          );
+        })
+      : [h("div", { class: "empty-state" }, h("strong", {}, "No staff accounts yet"), h("span", {}, "Add your team so everyone logs in with their own PIN."))]),
+  );
+
+  const roles = Object.keys(rolePermissions);
+  $("roles-help").replaceChildren(
+    h(
+      "table",
+      { class: "roles-table" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Permission"), ...roles.map((r) => h("th", {}, cap(r))), h("th", {}, "Customer"))),
+      h(
+        "tbody",
+        {},
+        ...Object.entries(permissionLabels).map(([key, label]) =>
+          h(
+            "tr",
+            {},
+            h("td", {}, label),
+            ...roles.map((r) => (rolePermissions[r].includes(key) ? h("td", { class: "yes" }, "✓") : h("td", { class: "no" }, "–"))),
+            h("td", { class: "no" }, "–"),
+          ),
+        ),
+        h(
+          "tr",
+          {},
+          h("td", {}, "Chat, book a table, look up / cancel own booking (public website)"),
+          ...roles.map(() => h("td", { class: "yes" }, "✓")),
+          h("td", { class: "yes" }, "✓"),
+        ),
+      ),
+    ),
+  );
+}
+
+async function updateStaff(member, changes) {
+  try {
+    await api(`/staff/${member.id}`, { method: "PATCH", body: changes });
+    toast(`${member.name} updated`, { tone: "success" });
+    await loadStaff();
+  } catch (err) {
+    toast(err.message, { tone: "error" });
+  }
+}
+
+const staffDialog = $("staff-dialog");
+let staffMode = null;
+let staffRole = "staff";
+
+$("add-staff-btn").addEventListener("click", () => openStaffDialog({ mode: "add" }));
+$("staff-close").addEventListener("click", () => staffDialog.close());
+$("staff-cancel").addEventListener("click", () => staffDialog.close());
+for (const b of document.querySelectorAll("#st-role button")) {
+  b.addEventListener("click", () => {
+    staffRole = b.dataset.role;
+    for (const x of document.querySelectorAll("#st-role button")) x.setAttribute("aria-checked", String(x === b));
+  });
+}
+
+function openStaffDialog({ mode, member = null }) {
+  staffMode = { mode, member };
+  const adding = mode === "add";
+  $("staff-title").textContent = adding ? "Add staff" : `New PIN for ${member.name}`;
+  $("staff-identity").hidden = !adding;
+  $("staff-role-field").hidden = !adding;
+  $("st-name").required = adding;
+  $("st-username").required = adding;
+  for (const id of ["st-name", "st-username", "st-pin", "st-pin2"]) $(id).value = "";
+  $("staff-error").textContent = "";
+  $("staff-submit").textContent = adding ? "Add staff" : "Save new PIN";
+  staffRole = "staff";
+  for (const x of document.querySelectorAll("#st-role button")) x.setAttribute("aria-checked", String(x.dataset.role === "staff"));
+  staffDialog.showModal();
+  (adding ? $("st-name") : $("st-pin")).focus();
+}
+
+$("st-name").addEventListener("input", () => {
+  // Suggest a username from the first name.
+  if (!$("st-username").dataset.touched) $("st-username").value = $("st-name").value.trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9._-]/g, "") ?? "";
+});
+$("st-username").addEventListener("input", () => ($("st-username").dataset.touched = "1"));
+
+$("staff-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("staff-error").textContent = "";
+  if ($("st-pin").value !== $("st-pin2").value) {
+    $("staff-error").textContent = "The two PINs don't match.";
+    return;
+  }
+  try {
+    if (staffMode.mode === "add") {
+      const { member } = await api("/staff", {
+        method: "POST",
+        body: { name: $("st-name").value, username: $("st-username").value, role: staffRole, pin: $("st-pin").value },
+      });
+      toast(`${member.name} can now log in as "${member.username}"`, { tone: "success" });
+    } else {
+      await api(`/staff/${staffMode.member.id}`, { method: "PATCH", body: { pin: $("st-pin").value } });
+      toast(`New PIN saved for ${staffMode.member.name}. They've been signed out.`, { tone: "success" });
+    }
+    delete $("st-username").dataset.touched;
+    staffDialog.close();
+    await loadStaff();
+  } catch (err) {
+    $("staff-error").textContent = err.message;
+  }
+});
 
 // ---------- Helpers ----------
 
@@ -1092,6 +1731,18 @@ function shortTable(name) {
 
 function prettyName(id) {
   return id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bAnd\b/g, "&");
+}
+
+function initials(name) {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function cap(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function readPref(key, fallback) {

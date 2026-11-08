@@ -36,6 +36,8 @@ async function init() {
   if (tenant.booking) {
     $("book-btn").hidden = false;
     $("book-btn").addEventListener("click", openBookingCard);
+    $("manage-btn").hidden = false;
+    $("manage-btn").addEventListener("click", openManageCard);
   }
 
   for (const question of tenant.suggestedQuestions) {
@@ -418,6 +420,91 @@ function openBookingCard() {
 
   addCard(form);
   loadTimes();
+}
+
+/** Customers look up (and cancel) their own booking with its reference + phone number. */
+function openManageCard() {
+  const reference = el("input", { maxlength: "12", autocomplete: "off", placeholder: "e.g. BB-7K3QX", required: true });
+  const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
+  const error = el("p", { class: "form-error", role: "alert" });
+  const result = el("div", { class: "booking-result" });
+  const find = el("button", { type: "submit", class: "primary" }, "Find booking");
+  const close = el("button", { type: "button", class: "ghost" }, "Close");
+
+  const form = el(
+    "form",
+    { class: "booking-card form" },
+    el("strong", {}, "Your booking"),
+    el("div", { class: "hint" }, "Enter the reference from your confirmation and the phone number you booked with."),
+    el("div", { class: "row" }, el("label", {}, "Reference", reference), el("label", {}, "Phone", phone)),
+    error,
+    result,
+    el("div", { class: "actions" }, close, find),
+  );
+
+  const call = async (action) => {
+    const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/bookings/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reference: reference.value.trim(), phone: phone.value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data.booking;
+  };
+
+  const STATUS = { confirmed: "Confirmed", seated: "Seated", completed: "Finished", cancelled: "Cancelled", no_show: "Missed" };
+  const show = (b) => {
+    const cancel = el("button", { type: "button", class: "ghost danger" }, "Cancel this booking");
+    let armed = false;
+    cancel.addEventListener("click", async () => {
+      if (!armed) {
+        armed = true;
+        cancel.textContent = "Tap again to cancel";
+        setTimeout(() => {
+          armed = false;
+          cancel.textContent = "Cancel this booking";
+        }, 3000);
+        return;
+      }
+      cancel.disabled = true;
+      try {
+        show(await call("cancel"));
+      } catch (err) {
+        error.textContent = err.message;
+        cancel.disabled = false;
+      }
+    });
+    result.replaceChildren(
+      el(
+        "div",
+        { class: `booking-summary ${b.status}` },
+        el("div", { class: "ref" }, b.reference),
+        el("div", {}, `${b.dateText} at ${b.time}`),
+        el("div", {}, `${b.partySize} ${b.partySize === 1 ? "person" : "people"} · ${b.name}`),
+        el("div", { class: "status" }, STATUS[b.status] ?? b.status),
+        b.status === "confirmed" ? cancel : null,
+      ),
+    );
+  };
+
+  close.addEventListener("click", () => form.remove());
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    find.disabled = true;
+    try {
+      show(await call("lookup"));
+    } catch (err) {
+      result.replaceChildren();
+      error.textContent = err.message;
+    } finally {
+      find.disabled = false;
+    }
+  });
+
+  addCard(form);
+  reference.focus();
 }
 
 function shiftDate(date, days) {

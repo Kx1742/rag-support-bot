@@ -216,17 +216,26 @@ export class BookingService {
     return this.get(id)!;
   }
 
-  /** Customer self-cancel: needs both the reference and the phone used to book. */
-  cancelByReference(reference: string, phone: string): Booking {
+  /**
+   * Customer self-service: finds a booking only when both the reference and the phone
+   * used to book match. Same error either way, so references can't be probed.
+   */
+  findForCustomer(reference: string, phone: string): Booking {
     const ref = String(reference ?? "").trim().toUpperCase();
     const row = this.db.prepare(`SELECT * FROM bookings WHERE reference = ?`).get(ref) as unknown as Row | undefined;
-    // Same message for "no such booking" and "wrong phone", so references can't be probed.
-    if (!row || !phone || row.phone !== normalizePhone(phone)) {
+    const normalized = normalizePhone(phone ?? "");
+    if (!row || !normalized || row.phone !== normalized) {
       throw new ShopError("not_found", "No booking matches that reference and phone number.");
     }
-    if (row.status !== "confirmed") throw new ShopError("invalid_status", `This booking is already ${row.status.replace("_", "-")}.`);
-    if (row.date < this.today().date) throw new ShopError("invalid_status", "This booking is in the past.");
-    return this.setStatus(row.id, "cancelled");
+    return this.toBooking(row);
+  }
+
+  /** Customer self-cancel: needs both the reference and the phone used to book. */
+  cancelByReference(reference: string, phone: string): Booking {
+    const booking = this.findForCustomer(reference, phone);
+    if (booking.status !== "confirmed") throw new ShopError("invalid_status", `This booking is already ${booking.status.replace("_", "-")}.`);
+    if (booking.date < this.today().date) throw new ShopError("invalid_status", "This booking is in the past.");
+    return this.setStatus(booking.id, "cancelled");
   }
 
   toPublic(b: Booking): PublicBooking {

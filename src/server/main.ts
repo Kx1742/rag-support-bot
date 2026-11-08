@@ -59,7 +59,9 @@ const server = createAppServer({
 
 server.listen(port, () => {
   console.log(`Support bot running in ${providers.name.toUpperCase()} mode at http://localhost:${port}`);
-  const desk = staffAuth.isEnabled(env.DEFAULT_TENANT ?? "bean-and-byte");
-  console.log(desk ? `Staff desk: http://localhost:${port}/desk` : "Staff desk is off: set STAFF_PASSWORD (8+ characters) in .env to turn it on.");
+  console.log(`Staff desk: http://localhost:${port}/desk`);
+  if (!staffAuth.ownerEnabled(env.DEFAULT_TENANT ?? "bean-and-byte")) {
+    console.log("No owner password: set STAFF_PASSWORD (8+ characters) in .env to log in as \"owner\" and add staff accounts.");
+  }
   if (providers.name === "offline") console.log("Chat bookings need Gemini; in offline mode customers use the booking form.");
 });

@@ -498,3 +498,50 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* Customer: manage booking */
+.booking-summary {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.booking-summary .status {
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.booking-summary.cancelled .status,
+.booking-summary.no_show .status {
+  color: var(--error);
+}
+
+.booking-summary .ghost.danger {
+  justify-self: start;
+  margin-top: 6px;
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.booking-summary .ghost.danger:disabled {
+  opacity: 0.5;
+}
+
+/* Phones: title on the first row, the three header buttons share the second row. */
+@media (max-width: 560px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .topbar .title {
+    flex: 1 1 calc(100% - 54px);
+  }
+  .topbar .ghost {
+    flex: 1 1 0;
+    padding: 8px 6px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}

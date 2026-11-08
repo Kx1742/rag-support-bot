@@ -16,9 +16,11 @@
           <svg viewBox="0 0 24 24"><path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9Zm13 1h1.5a2.5 2.5 0 0 1 0 5H17M7 3c0 1.5 1 1.5 1 3M11 3c0 1.5 1 1.5 1 3" /></svg>
         </div>
         <h1>Shop desk</h1>
-        <p class="muted">Staff only. Log in to run the till, orders and bookings.</p>
+        <p class="muted">Staff only. Log in with your username and PIN.</p>
         <label class="field">Business ID <input id="login-tenant" autocomplete="organization" autocapitalize="none" required /></label>
-        <label class="field">Password <input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <label class="field">Username <input id="login-username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="e.g. sam" required /></label>
+        <label class="field">PIN <input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <p class="hint login-hint">Owner? Use the username <b>owner</b> and the owner password.</p>
         <p class="error" id="login-error" role="alert"></p>
         <button class="btn btn-primary btn-lg btn-block" type="submit">Log in</button>
       </form>
@@ -52,17 +54,26 @@
             <span>Menu</span>
             <b class="nav-badge muted-badge" id="badge-menu" hidden></b>
           </button>
+          <button role="tab" data-tab="report" aria-selected="false" data-perm="reports.view" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>
+            <span>Report</span>
+          </button>
+          <button role="tab" data-tab="staff" aria-selected="false" data-perm="staff.manage" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7.5M22 21v-1a6 6 0 0 0-4-5.6" /></svg>
+            <span>Staff</span>
+          </button>
         </nav>
 
         <div class="topbar-tools">
           <span class="live" id="live"><i></i><span id="live-text">Live</span></span>
+          <span class="user-chip" id="user-chip" title="Logged in"></span>
           <button class="icon-btn" id="sound-toggle" type="button" aria-pressed="true" title="Alert sound">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9H3v6h3l5 4V5zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>
             <span class="sr-only">Alert sound</span>
           </button>
-          <button class="icon-btn" id="logout" type="button" title="Log out">
+          <button class="icon-btn" id="logout" type="button" title="Log out / switch user">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10" /></svg>
-            <span class="sr-only">Log out</span>
+            <span class="sr-only">Log out or switch user</span>
           </button>
         </div>
       </header>
@@ -108,8 +119,8 @@
               <span id="ticket-count">0 items</span>
               <strong id="ticket-total">$0.00</strong>
             </div>
-            <button class="btn btn-primary btn-xl btn-block" id="send-order" type="button" disabled>Send to kitchen</button>
-            <p class="hint">Payments aren't handled yet. Take payment at the counter.</p>
+            <button class="btn btn-primary btn-xl btn-block" id="charge-order" type="button" disabled data-perm="payments.take">Charge</button>
+            <button class="btn btn-ghost btn-block" id="send-order" type="button" disabled>Send without paying</button>
           </div>
         </aside>
       </section>
@@ -173,7 +184,177 @@
         </div>
         <div class="menu-admin" id="menu-admin"></div>
       </section>
+
+      <!-- Report (managers) -->
+      <section class="panel" data-panel="report" hidden>
+        <div class="day-bar">
+          <div class="day-nav">
+            <button class="icon-btn" id="report-prev" type="button" aria-label="Previous day">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <label class="day-label">
+              <strong id="report-title">Today</strong>
+              <input type="date" id="report-date" aria-label="Report date" />
+            </label>
+            <button class="icon-btn" id="report-next" type="button" aria-label="Next day">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+          <button class="btn btn-ghost" id="report-csv" type="button">Download CSV</button>
+        </div>
+        <div class="stats report-stats" id="report-stats"></div>
+        <div class="report-grid">
+          <section class="card-block">
+            <h2 class="section-title">Best sellers</h2>
+            <div id="report-items"></div>
+          </section>
+          <section class="card-block">
+            <h2 class="section-title">Sales by hour</h2>
+            <div class="hour-bars" id="report-hours"></div>
+          </section>
+        </div>
+        <section class="card-block" id="report-refunds-block">
+          <h2 class="section-title">Refunds</h2>
+          <div id="report-refunds"></div>
+        </section>
+      </section>
+
+      <!-- Staff accounts (managers) -->
+      <section class="panel" data-panel="staff" hidden>
+        <div class="menu-bar">
+          <p class="muted" id="staff-summary">Each person logs in with their own username and PIN.</p>
+          <button class="btn btn-primary" id="add-staff-btn" type="button">+ Add staff</button>
+        </div>
+        <div class="staff-list" id="staff-list"></div>
+        <section class="card-block roles-help">
+          <h2 class="section-title">What each role can do</h2>
+          <div id="roles-help"></div>
+        </section>
+      </section>
     </div>
+
+    <!-- Item options (size, milk, extras) -->
+    <dialog class="sheet" id="options-dialog" aria-labelledby="opt-title">
+      <form id="options-form" method="dialog">
+        <header class="sheet-head">
+          <div>
+            <h2 id="opt-title">Item</h2>
+            <span class="muted" id="opt-base"></span>
+          </div>
+          <button class="icon-btn" type="button" id="opt-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body" id="opt-groups"></div>
+        <div class="sheet-body sheet-body-tight">
+          <div class="form-row">
+            <div class="field">
+              Quantity
+              <div class="stepper">
+                <button type="button" id="opt-minus" aria-label="One fewer">−</button>
+                <output id="opt-qty">1</output>
+                <button type="button" id="opt-plus" aria-label="One more">+</button>
+              </div>
+            </div>
+            <label class="field">Note <input class="input" id="opt-note" maxlength="100" placeholder="e.g. no foam" /></label>
+          </div>
+        </div>
+        <footer class="sheet-foot">
+          <button class="btn btn-danger" type="button" id="opt-remove" hidden>Remove</button>
+          <button class="btn btn-primary btn-lg" type="submit" id="opt-submit">Add</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Payment -->
+    <dialog class="sheet" id="pay-dialog" aria-labelledby="pay-title">
+      <form id="pay-form" method="dialog">
+        <header class="sheet-head">
+          <h2 id="pay-title">Take payment</h2>
+          <button class="icon-btn" type="button" id="pay-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <div class="pay-total"><span>Total</span><strong id="pay-total">$0.00</strong></div>
+          <div class="segmented" id="pay-method" role="radiogroup" aria-label="Payment method">
+            <button type="button" role="radio" data-method="cash" aria-checked="true">Cash</button>
+            <button type="button" role="radio" data-method="card" aria-checked="false">Card</button>
+          </div>
+          <div id="pay-cash">
+            <div class="field">Cash given</div>
+            <div class="tender-grid" id="pay-quick"></div>
+            <label class="field">Other amount <input class="input input-money" id="pay-tendered" inputmode="decimal" autocomplete="off" placeholder="0.00" /></label>
+            <div class="change-due" id="pay-change"></div>
+          </div>
+          <p class="muted" id="pay-card" hidden>Take the card payment on your card machine, then confirm here once it's approved.</p>
+          <p class="error" id="pay-error" role="alert"></p>
+        </div>
+        <footer class="sheet-foot">
+          <button class="btn btn-ghost" type="button" id="pay-cancel">Back</button>
+          <button class="btn btn-primary btn-lg" type="submit" id="pay-submit" disabled>Complete payment</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Refund (managers) -->
+    <dialog class="sheet" id="refund-dialog" aria-labelledby="refund-title">
+      <form id="refund-form" method="dialog">
+        <header class="sheet-head">
+          <h2 id="refund-title">Refund order</h2>
+          <button class="icon-btn" type="button" id="refund-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <p id="refund-summary"></p>
+          <div class="field">
+            Reason
+            <div class="chip-choices" id="refund-reasons"></div>
+          </div>
+          <label class="field">Details <input class="input" id="refund-reason" maxlength="200" placeholder="Reason for the refund" required /></label>
+          <p class="error" id="refund-error" role="alert"></p>
+        </div>
+        <footer class="sheet-foot">
+          <button class="btn btn-ghost" type="button" id="refund-cancel">Back</button>
+          <button class="btn btn-danger btn-lg" type="submit" id="refund-submit">Refund &amp; cancel order</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Add / edit staff (managers) -->
+    <dialog class="sheet" id="staff-dialog" aria-labelledby="staff-title">
+      <form id="staff-form" method="dialog">
+        <header class="sheet-head">
+          <h2 id="staff-title">Add staff</h2>
+          <button class="icon-btn" type="button" id="staff-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <div class="form-row" id="staff-identity">
+            <label class="field">Name <input class="input" id="st-name" maxlength="60" required autocomplete="off" /></label>
+            <label class="field">Username <input class="input" id="st-username" maxlength="30" required autocomplete="off" autocapitalize="none" spellcheck="false" /></label>
+          </div>
+          <div class="field" id="staff-role-field">
+            Role
+            <div class="segmented" id="st-role" role="radiogroup" aria-label="Role">
+              <button type="button" role="radio" data-role="staff" aria-checked="true">Staff</button>
+              <button type="button" role="radio" data-role="manager" aria-checked="false">Manager</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="field">PIN (4-8 digits) <input class="input" id="st-pin" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" required /></label>
+            <label class="field">Repeat PIN <input class="input" id="st-pin2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" required /></label>
+          </div>
+          <p class="error" id="staff-error" role="alert"></p>
+        </div>
+        <footer class="sheet-foot">
+          <button class="btn btn-ghost" type="button" id="staff-cancel">Close</button>
+          <button class="btn btn-primary btn-lg" type="submit" id="staff-submit">Add staff</button>
+        </footer>
+      </form>
+    </dialog>
 
     <!-- New booking dialog -->
     <dialog class="sheet" id="booking-dialog" aria-labelledby="nb-title">

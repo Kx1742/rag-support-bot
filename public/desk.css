@@ -333,7 +333,9 @@ button:disabled {
 
 .topbar-brand {
   display: grid;
-  min-width: 0;
+  flex: none;
+  min-width: 90px;
+  max-width: 170px;
 }
 
 .topbar-brand strong {
@@ -1023,13 +1025,19 @@ button:disabled {
   font-weight: 650;
 }
 
+/* Main action on its own full-width row; smaller actions wrap underneath. */
 .card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .card-actions .btn-go {
-  flex: 1;
+  flex: 1 1 100%;
+}
+
+.card-actions .btn-sm {
+  flex: 1 1 auto;
 }
 
 .order-total {
@@ -1643,7 +1651,8 @@ button:disabled {
 
 /* ---------- Tablet portrait & phones ---------- */
 
-@media (max-width: 1100px) {
+/* Six tabs + user chip don't fit with labels below ~1280px: show icons only. */
+@media (max-width: 1280px) {
   .nav button span {
     display: none;
   }
@@ -1770,4 +1779,482 @@ button:disabled {
   .form-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* ===================== Roles, options, payments, report, staff ===================== */
+
+.login-hint {
+  text-align: left;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  color: var(--bar-text);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-chip b {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #ffb547;
+  color: var(--bar);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.user-chip b.staff {
+  background: rgb(255 255 255 / 0.25);
+  color: #fff;
+}
+
+/* Ticket lines with options */
+.ticket-lines .line-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ticket-lines .line-name small,
+.order-items small {
+  display: block;
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.order-items small {
+  margin-left: 32px;
+  font-size: 14px;
+}
+
+.ticket-lines .line-name em,
+.order-items em {
+  display: block;
+  color: var(--note-text);
+  background: var(--note-bg);
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-style: normal;
+  justify-self: start;
+}
+
+.order-items em {
+  margin-left: 32px;
+  display: inline-block;
+}
+
+.ticket-foot #send-order {
+  min-height: 44px;
+  font-size: 15px;
+}
+
+/* Option sheet */
+.opt-group {
+  display: grid;
+  gap: 8px;
+}
+
+.opt-group h3 {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+}
+
+.opt-group h3 span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.choices button {
+  display: grid;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+  font-weight: 650;
+}
+
+.choices button small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.choices button[aria-checked="true"] {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.choices button[aria-checked="true"] small {
+  color: var(--brand-strong);
+}
+
+.sheet-body-tight {
+  padding-top: 0;
+}
+
+/* Payment sheet */
+.pay-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pay-total strong {
+  font-size: 36px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tender-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tender-grid button {
+  min-height: 56px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.tender-grid button[aria-checked="true"] {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+
+.input-money {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-due {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.change-due strong {
+  float: right;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-due.ok {
+  background: var(--ready-bg);
+  color: var(--ready);
+}
+
+.change-due.short {
+  background: var(--late-bg);
+  color: var(--late);
+}
+
+.chip-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-choices button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-weight: 600;
+}
+
+/* Paid / unpaid on order cards */
+.chip.paid {
+  background: var(--ready-bg);
+  color: var(--ready);
+}
+
+.chip.unpaid {
+  background: var(--late-bg);
+  color: var(--late);
+}
+
+.chip.refunded {
+  background: var(--surface-2);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.btn-pay {
+  background: var(--ready);
+  color: #fff;
+}
+
+/* Report */
+.report-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.card-block {
+  padding: 4px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.card-block .section-title {
+  margin-top: 14px;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-table th,
+.report-table td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+
+.report-table th:first-child,
+.report-table td:first-child {
+  text-align: left;
+}
+
+.report-table th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.hour-bars {
+  display: grid;
+  gap: 6px;
+}
+
+.hour-row {
+  display: grid;
+  grid-template-columns: 54px 1fr 80px;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hour-row .bar {
+  height: 22px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.hour-row .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--brand);
+}
+
+.hour-row span:last-child {
+  text-align: right;
+}
+
+.empty-note {
+  padding: 18px 0;
+  color: var(--muted);
+}
+
+/* Staff */
+.staff-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.staff-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.staff-row.inactive {
+  opacity: 0.55;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.staff-row .who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.staff-row .who strong {
+  font-size: 17px;
+}
+
+.staff-row .who span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chip.role-manager {
+  background: #ffe2b0;
+  color: #7a4a00;
+}
+
+.chip.role-staff {
+  background: var(--surface-2);
+}
+
+.staff-row .actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.roles-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.roles-table th,
+.roles-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+
+.roles-table th:first-child,
+.roles-table td:first-child {
+  text-align: left;
+}
+
+.roles-table .yes {
+  color: var(--ready);
+  font-weight: 800;
+}
+
+.roles-table .no {
+  color: var(--muted);
+}
+
+@media (max-width: 1100px) {
+  .user-chip {
+    max-width: 110px;
+  }
+}
+
+@media (max-width: 900px) {
+  .report-grid {
+    grid-template-columns: 1fr;
+  }
+  .report-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ticket-foot {
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "total charge" "send send";
+  }
+  .ticket-foot .ticket-total {
+    grid-area: total;
+  }
+  .ticket-foot #charge-order {
+    grid-area: charge;
+  }
+  .ticket-foot #send-order {
+    grid-area: send;
+    min-height: 40px;
+  }
+  .till {
+    padding-bottom: 190px;
+  }
+  .staff-row {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+  .staff-row .actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .user-chip {
+    display: none;
+  }
+}
+
+.stat.warn {
+  border-color: var(--prep);
+  background: var(--prep-bg);
+}
+
+.stat.warn strong {
+  color: var(--prep);
 }

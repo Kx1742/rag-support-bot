@@ -1,44 +1,54 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import type { Role } from "../shop/staff.ts";
 
 export interface StaffSession {
   tenantId: string;
+  /** null for the owner login (password from .env). */
+  staffId: number | null;
+  username: string;
+  name: string;
+  role: Role;
   expiresAt: number;
 }
 
+export type SessionIdentity = Omit<StaffSession, "expiresAt">;
+
 /**
- * Staff login for the shop desk: one shared password per business, sessions kept
- * in memory (staff log in again after a server restart).
- * Upgrade path: per-staff accounts with hashed passwords in the database.
+ * Desk sessions, kept in memory (people log in again after a server restart).
+ * Two ways in: the owner password from .env (always a manager), or a staff
+ * account's username + PIN, checked by the shop's StaffService.
  */
 export class StaffAuth {
   private readonly sessions = new Map<string, StaffSession>();
-  private readonly passwordFor: (tenantId: string) => string | undefined;
+  private readonly ownerPasswordFor: (tenantId: string) => string | undefined;
   private readonly ttlMs: number;
   private readonly now: () => number;
 
   constructor(options: { passwordFor: (tenantId: string) => string | undefined; ttlMs?: number; now?: () => number }) {
-    this.passwordFor = options.passwordFor;
+    this.ownerPasswordFor = options.passwordFor;
     this.ttlMs = options.ttlMs ?? 12 * 60 * 60 * 1000;
     this.now = options.now ?? Date.now;
   }
 
-  /** True when a password is configured, i.e. the desk is switched on for this tenant. */
-  isEnabled(tenantId: string): boolean {
-    return !!this.passwordFor(tenantId);
+  /** True when an owner password is configured for this tenant. */
+  ownerEnabled(tenantId: string): boolean {
+    return !!this.ownerPasswordFor(tenantId);
   }
 
-  /** Returns a session token, or null if the password is wrong. */
-  login(tenantId: string, password: string): string | null {
-    const expected = this.passwordFor(tenantId);
-    if (!expected || typeof password !== "string") return null;
-    // Hash both so the comparison is constant-time even for different lengths.
+  /** Constant-time check of the owner password. */
+  checkOwner(tenantId: string, password: string): boolean {
+    const expected = this.ownerPasswordFor(tenantId);
+    if (!expected || typeof password !== "string") return false;
     const a = createHash("sha256").update(password).digest();
     const b = createHash("sha256").update(expected).digest();
-    if (!timingSafeEqual(a, b)) return null;
+    return timingSafeEqual(a, b);
+  }
 
+  /** Starts a session and returns its token. */
+  start(identity: SessionIdentity): string {
     this.pruneExpired();
     const token = randomBytes(32).toString("base64url");
-    this.sessions.set(token, { tenantId, expiresAt: this.now() + this.ttlMs });
+    this.sessions.set(token, { ...identity, expiresAt: this.now() + this.ttlMs });
     return token;
   }
 
@@ -57,6 +67,13 @@ export class StaffAuth {
     if (token) this.sessions.delete(token);
   }
 
+  /** Ends every session of one staff member (after deactivation or a PIN reset). */
+  endSessionsFor(tenantId: string, staffId: number): void {
+    for (const [token, s] of this.sessions) {
+      if (s.tenantId === tenantId && s.staffId === staffId) this.sessions.delete(token);
+    }
+  }
+
   private pruneExpired(): void {
     const now = this.now();
     for (const [token, s] of this.sessions) if (s.expiresAt <= now) this.sessions.delete(token);
@@ -64,9 +81,9 @@ export class StaffAuth {
 }
 
 /**
- * Reads the desk password from the environment:
+ * Reads the owner password from the environment:
  * STAFF_PASSWORD_BEAN_AND_BYTE for tenant "bean-and-byte", else STAFF_PASSWORD.
- * Passwords shorter than 8 characters are ignored (desk stays off).
+ * Passwords shorter than 8 characters are ignored.
  */
 export function passwordFromEnv(env: NodeJS.ProcessEnv) {
   return (tenantId: string): string | undefined => {

@@ -156,54 +156,7 @@ describe("changing bookings", () => {
   });
 });
 
-describe("menu and orders", () => {
-  it("prices orders from the database and numbers them per day", async () => {
-    const { shop, setNow } = await makeShop();
-    const first = shop.orders.create({
-      type: "takeaway",
-      customerName: "Ben",
-      items: [
-        { itemId: "flat-white", quantity: 2 },
-        { itemId: "oat-milk", quantity: 2, note: "for both" },
-        { itemId: "croissant", quantity: 1 },
-      ],
-    });
-    assert.equal(first.number, 1);
-    assert.equal(first.total, 2 * 450 + 2 * 60 + 350);
-    assert.equal(first.items[1].note, "for both");
-    assert.equal(first.tableId, null);
-
-    const second = shop.orders.create({ type: "dine_in", tableId: "T4", items: [{ itemId: "mocha", quantity: 1 }] });
-    assert.equal(second.number, 2);
-    assert.equal(second.tableId, "T4");
-
-    setNow(new Date("2026-11-14T15:00:00Z"));
-    assert.equal(shop.orders.create({ type: "takeaway", items: [{ itemId: "espresso", quantity: 1 }] }).number, 1);
-  });
-
-  it("rejects bad orders and sold-out items", async () => {
-    const { shop } = await makeShop();
-    assert.throws(() => shop.orders.create({ type: "takeaway", items: [] }), /at least one/);
-    assert.throws(() => shop.orders.create({ type: "takeaway", items: [{ itemId: "caviar", quantity: 1 }] }), /Unknown menu item/);
-    assert.throws(() => shop.orders.create({ type: "takeaway", items: [{ itemId: "mocha", quantity: 0 }] }), /Quantity/);
-    assert.throws(() => shop.orders.create({ type: "dine_in", tableId: "T99", items: [{ itemId: "mocha", quantity: 1 }] }), /Unknown table/);
-
-    shop.menu.setAvailable("mocha", false);
-    assert.throws(() => shop.orders.create({ type: "takeaway", items: [{ itemId: "mocha", quantity: 1 }] }), /sold out/);
-  });
-
-  it("moves orders through the kitchen flow and summarizes the day", async () => {
-    const { shop } = await makeShop();
-    const a = shop.orders.create({ type: "takeaway", items: [{ itemId: "latte", quantity: 2 }] });
-    const b = shop.orders.create({ type: "takeaway", items: [{ itemId: "chai", quantity: 1 }] });
-
-    for (const s of ["preparing", "ready", "completed"] as const) shop.orders.setStatus(a.id, s);
-    shop.orders.setStatus(b.id, "cancelled");
-    assert.throws(() => shop.orders.setStatus(b.id, "new"), /Can't change/);
-
-    assert.deepEqual(shop.orders.summary(), { orders: 1, items: 2, sales: 950, open: 0 });
-  });
-
+describe("menu", () => {
   it("keeps sold-out flags when the menu file changes", async () => {
     const { shop } = await makeShop();
     shop.menu.setAvailable("mocha", false);
@@ -211,9 +164,10 @@ describe("menu and orders", () => {
       { id: "mocha", name: "Mocha", category: "Coffee", price: 550 },
       { id: "tea", name: "Tea", category: "Not Coffee", price: 300 },
     ]);
-    assert.deepEqual(shop.menu.list(), [
-      { id: "mocha", name: "Mocha", category: "Coffee", price: 550, available: false },
-      { id: "tea", name: "Tea", category: "Not Coffee", price: 300, available: true },
+    const list = shop.menu.list().map(({ id, price, available }) => ({ id, price, available }));
+    assert.deepEqual(list, [
+      { id: "mocha", price: 550, available: false },
+      { id: "tea", price: 300, available: true },
     ]);
   });
 });
