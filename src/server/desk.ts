@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { BOOKING_STATUSES, type BookingStatus } from "../shop/bookings.ts";
 import { ORDER_STATUSES, type OrderInput, type OrderStatus, PAYMENT_METHODS, type PaymentInput } from "../shop/orders.ts";
+import type { MenuItemInput } from "../shop/menu.ts";
 import type { Shop, ShopChange } from "../shop/shop.ts";
 import { OWNER_USERNAME, ROLES, type Role } from "../shop/staff.ts";
 import { isDate } from "../shop/time.ts";
@@ -100,7 +101,12 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
 
     // ----- menu & orders -----
     case "GET /menu":
-      return ok(res, { menu: shop.menu.list(), optionGroups: shop.menu.optionGroups() });
+      // Managers also see hidden items so they can bring them back.
+      return ok(res, { menu: shop.menu.list({ includeHidden: can(user.role, "menu.edit") }), optionGroups: shop.menu.optionGroups() });
+    case "POST /menu": {
+      need("menu.edit");
+      return ok(res, { item: shop.menu.create(parseMenuItem(await readObject(req))) }, 201);
+    }
     case "GET /orders": {
       const summary = shop.orders.summary(date);
       // Staff see workload numbers; money totals are for managers.
@@ -168,10 +174,23 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
     return ok(res, { order: shop.orders.refund(idParam(match[1]), String((await readObject(req)).reason ?? ""), actor) });
   }
   if (req.method === "PATCH" && (match = /^\/menu\/([a-z0-9-]+)$/.exec(rest))) {
-    need("menu.soldOut");
+    const id = match[1];
     const body = await readObject(req);
-    if (typeof body.available !== "boolean") throw new HttpError(400, "available must be true or false");
-    return ok(res, { item: shop.menu.setAvailable(match[1], body.available) });
+    // Staff: sold-out switch and stock counts. Managers: everything else.
+    if (typeof body.available === "boolean") {
+      need("menu.soldOut");
+      return ok(res, { item: shop.menu.setAvailable(id, body.available) });
+    }
+    if ("stock" in body && Object.keys(body).length === 1) {
+      need("menu.soldOut");
+      return ok(res, { item: shop.menu.setStock(id, body.stock === null ? null : Number(body.stock)) });
+    }
+    if (typeof body.hidden === "boolean") {
+      need("menu.edit");
+      return ok(res, { item: shop.menu.setHidden(id, body.hidden) });
+    }
+    need("menu.edit");
+    return ok(res, { item: shop.menu.update(id, parseMenuItem(body)) });
   }
   if (req.method === "PATCH" && (match = /^\/staff\/(\d+)$/.exec(rest))) {
     need("staff.manage");
@@ -271,6 +290,16 @@ function parseOrder(body: Record<string, unknown>): OrderInput {
           options: i?.options && typeof i.options === "object" && !Array.isArray(i.options) ? (i.options as Record<string, string | string[]>) : {},
         }))
       : [],
+  };
+}
+
+function parseMenuItem(b: Record<string, unknown>): MenuItemInput {
+  return {
+    name: String(b.name ?? ""),
+    category: String(b.category ?? ""),
+    price: Number(b.price),
+    options: Array.isArray(b.options) ? b.options.map(String) : [],
+    stock: b.stock === null || b.stock === undefined || b.stock === "" ? null : Number(b.stock),
   };
 }
 

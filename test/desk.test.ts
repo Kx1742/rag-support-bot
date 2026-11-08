@@ -298,6 +298,42 @@ describe("desk and booking HTTP API", async () => {
     assert.equal(res.status, 400);
   });
 
+  it("staff set stock counts; only managers edit the menu", async () => {
+    await desk("/staff", { method: "POST", body: { username: "leo", name: "Leo", role: "staff", pin: "6284" }, cookie: managerCookie });
+    const leo = (await login({ username: "leo", pin: "6284" })).cookie;
+
+    const stock = await desk("/menu/croissant", { method: "PATCH", body: { stock: 12 }, cookie: leo });
+    assert.equal(stock.status, 200);
+    assert.equal((await stock.json()).item.stock, 12);
+
+    for (const body of [{ name: "X", category: "Food", price: 1 }, { hidden: true }]) {
+      assert.equal((await desk("/menu/croissant", { method: "PATCH", body, cookie: leo })).status, 403);
+    }
+    assert.equal((await desk("/menu", { method: "POST", body: { name: "Pie", category: "Food", price: 450 }, cookie: leo })).status, 403);
+
+    const added = await desk("/menu", { method: "POST", body: { name: "Apple Pie", category: "Food", price: 450, stock: 6 }, cookie: managerCookie });
+    assert.equal(added.status, 201);
+    await desk("/menu/apple-pie", { method: "PATCH", body: { hidden: true }, cookie: managerCookie });
+    const staffMenu = (await (await desk("/menu", { cookie: leo })).json()).menu;
+    const managerMenu = (await (await desk("/menu", { cookie: managerCookie })).json()).menu;
+    assert.ok(!staffMenu.some((m: { id: string }) => m.id === "apple-pie"), "staff don't see hidden items");
+    assert.ok(managerMenu.some((m: { id: string; hidden: boolean }) => m.id === "apple-pie" && m.hidden));
+
+    const oversell = await desk("/orders", { method: "POST", body: { type: "takeaway", items: [{ itemId: "croissant", quantity: 13 }] }, cookie: leo });
+    assert.equal(oversell.status, 409);
+    assert.match((await oversell.json()).error, /Only 12/);
+  });
+
+  it("the public pickup screen gets order numbers only", async () => {
+    const res = await fetch(`${base}/api/tenants/${tenant.id}/pickup`);
+    assert.equal(res.status, 200);
+    const board = await res.json();
+    assert.deepEqual(Object.keys(board).sort(), ["name", "preparing", "ready"]);
+    assert.ok(board.preparing.every((n: unknown) => typeof n === "number"));
+    assert.ok(!JSON.stringify(board).includes("Ben"), "no customer names");
+    assert.equal((await fetch(`${base}/display`)).status, 200);
+  });
+
   it("customers can look up and cancel only their own booking", async () => {
     const post = (path: string, body: object) =>
       fetch(`${base}/api/tenants/${tenant.id}/bookings/${path}`, {

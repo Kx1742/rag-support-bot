@@ -61,6 +61,7 @@ export class Assistant {
   private readonly chat: ChatProvider;
   private readonly options: Required<AssistantOptions>;
   private readonly tools?: AssistantTools;
+  private readonly notices?: (question: string) => string[];
 
   constructor(deps: {
     tenant: TenantConfig;
@@ -69,6 +70,8 @@ export class Assistant {
     chat: ChatProvider;
     options?: AssistantOptions;
     tools?: AssistantTools;
+    /** Live notices shown before the answer, e.g. "Mocha is sold out today". */
+    notices?: (question: string) => string[];
   }) {
     this.tenant = deps.tenant;
     this.store = deps.store;
@@ -77,6 +80,7 @@ export class Assistant {
     this.options = { topK: 4, minScore: 0.5, historyLimit: 6, ...deps.options };
     // Tools only work with a model that supports function calling.
     this.tools = deps.chat.chatWithTools ? deps.tools : undefined;
+    this.notices = deps.notices;
   }
 
   /** True when the assistant can take actions such as bookings. */
@@ -107,6 +111,13 @@ export class Assistant {
     yield { type: "sources", sources };
 
     const messages = [...recent, { role: "user" as const, text: trimmed }];
+
+    // Without tools the model only sees the documents, so warn about live changes first.
+    if (!this.tools) {
+      for (const notice of this.notices?.(trimmed) ?? []) yield { type: "delta", text: `${notice}
+
+` };
+    }
 
     if (this.tools) {
       // With tools the model must always run: "table for 4 on Saturday" matches no FAQ text.

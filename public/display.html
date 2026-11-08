@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Order Pickup</title>
+    <link rel="stylesheet" href="/display.css" />
+    <script src="/display.js" defer></script>
+  </head>
+  <body>
+    <header class="bar">
+      <div>
+        <h1 id="name">Order pickup</h1>
+        <p class="sub">Listen for your number</p>
+      </div>
+      <div class="bar-right">
+        <span class="clock" id="clock"></span>
+        <button id="sound" type="button">Tap to turn on sound</button>
+        <button id="fullscreen" type="button" aria-label="Full screen">⛶</button>
+      </div>
+    </header>
+
+    <main class="board">
+      <section class="col preparing" aria-labelledby="prep-title">
+        <h2 id="prep-title">Preparing</h2>
+        <div class="numbers" id="preparing"></div>
+      </section>
+      <section class="col ready" aria-labelledby="ready-title">
+        <h2 id="ready-title">Ready to collect</h2>
+        <div class="numbers" id="ready" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <p class="offline" id="offline" hidden>Reconnecting…</p>
+  </body>
+</html>

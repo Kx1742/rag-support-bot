@@ -24,7 +24,7 @@ export function statusFor(err: unknown): number {
   if (err instanceof ShopError) {
     if (err.code === "not_found") return 404;
     // 409 = the request is fine but clashes with the current state (slot taken, already paid...).
-    const conflicts = ["unavailable", "invalid_status", "sold_out", "needs_refund", "already_paid", "not_paid", "taken", "last_manager"];
+    const conflicts = ["unavailable", "invalid_status", "sold_out", "needs_refund", "already_paid", "not_paid", "taken", "last_manager", "low_stock"];
     if (conflicts.includes(err.code)) return 409;
     if (err.code === "too_many") return 429;
     return 400;

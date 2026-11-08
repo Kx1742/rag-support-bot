@@ -89,6 +89,13 @@ const MIGRATIONS = [
   ALTER TABLE orders ADD COLUMN refunded_by TEXT;
   ALTER TABLE orders ADD COLUMN refund_reason TEXT;
   `,
+  // 3: menu editing in the desk + stock counts
+  `
+  ALTER TABLE menu_items ADD COLUMN options TEXT;                        -- JSON list of option group ids
+  ALTER TABLE menu_items ADD COLUMN stock INTEGER;                       -- NULL = not counted
+  ALTER TABLE menu_items ADD COLUMN edited INTEGER NOT NULL DEFAULT 0;   -- 1 = changed in the desk, shop.json no longer overrides it
+  ALTER TABLE menu_items ADD COLUMN origin TEXT NOT NULL DEFAULT 'file'; -- 'file' (shop.json) or 'desk'
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */

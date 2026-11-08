@@ -1,3 +1,4 @@
+import { keywords } from "../llm/offline.ts";
 import type { AssistantTools } from "../rag/assistant.ts";
 import type { ToolCall, ToolCallRecord, ToolDefinition } from "../types.ts";
 import type { PublicBooking } from "./bookings.ts";
@@ -6,6 +7,12 @@ import type { Shop } from "./shop.ts";
 import { addDays, describeDate, fromMinutes, weekdayOf } from "./time.ts";
 
 const DEFINITIONS: ToolDefinition[] = [
+  {
+    name: "get_menu",
+    description:
+      "Today's live menu: every item with its current price, whether it's available or sold out, how many are left when stock is low, and the size/milk/extra options with their prices. More up to date than the documents.",
+    parameters: { type: "object", properties: {} },
+  },
   {
     name: "check_availability",
     description:
@@ -51,12 +58,14 @@ const DEFINITIONS: ToolDefinition[] = [
   },
 ];
 
-/** Booking tools for the chat assistant, backed by the shop's real booking rules. */
+/** Chat assistant tools backed by the shop: live menu, plus bookings using the real booking rules. */
 export function createBookingTools(shop: Shop): AssistantTools {
   const run = async (call: ToolCall): Promise<unknown> => {
     const a = call.args;
     try {
       switch (call.name) {
+        case "get_menu":
+          return liveMenu(shop);
         case "check_availability": {
           const date = String(a.date ?? "");
           const partySize = Number(a.party_size);
@@ -112,7 +121,10 @@ function bookingInstructions(shop: Shop): string {
     return `${weekdayOf(d)} ${d}${i === 0 ? " (today)" : i === 1 ? " (tomorrow)" : ""}`;
   }).join(", ");
 
-  return `Table bookings:
+  return `Menu and prices:
+- For prices, what's available today and drink options, call get_menu. It is more up to date than the documents. Never offer an item it says is sold out.
+
+Table bookings:
 - You can check availability, book tables and cancel bookings with your tools. Tool results are trusted information, like the sources.
 - Today is ${describeDate(date)}, the time is ${fromMinutes(minutes)} (${timezone}). Upcoming dates: ${calendar}.
 - To book you need: date, time, party size (1-${shop.bookings.maxPartySize}), the customer's name and phone number. Ask for anything missing, a few things at a time.
@@ -122,4 +134,43 @@ function bookingInstructions(shop: Shop): string {
 - Bookings last ${booking.durationMinutes} minutes and can be made up to ${booking.maxDaysAhead} days ahead with at least ${booking.minNoticeMinutes} minutes' notice.
 - To cancel, ask for the booking reference and phone number, then call cancel_booking.
 - Times in tool calls use 24-hour HH:MM. Talk to customers in a friendly format like "10:30 am".`;
+}
+
+/** The live menu in a compact form for the model (prices as text, low stock only). */
+export function liveMenu(shop: Shop) {
+  const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: shop.config.currency });
+  const groups = new Map(shop.menu.optionGroups().map((g) => [g.id, g]));
+  return {
+    items: shop.menu.list().map((m) => ({
+      name: m.name,
+      category: m.category,
+      price: fmt.format(m.price / 100),
+      available: m.available,
+      ...(m.available && m.stock !== null && m.stock <= 10 ? { onlyLeft: m.stock } : {}),
+      options: m.options.map((id) => {
+        const g = groups.get(id)!;
+        return `${g.name}: ${g.choices.map((c) => (c.price ? `${c.name} (+${fmt.format(c.price / 100)})` : c.name)).join(", ")}`;
+      }),
+    })),
+  };
+}
+
+/**
+ * Sold-out notices for questions that mention a sold-out item, e.g.
+ * "Do you have almond croissants?" -> "Heads up: Almond Croissant is sold out today."
+ * Used when the model can't call get_menu (offline mode), so answers from the
+ * documents can't promise something the café has run out of.
+ */
+export function soldOutNotices(shop: Shop) {
+  return (question: string): string[] => {
+    const asked = new Set(keywords(question));
+    const soldOut = shop.menu.list().filter((m) => !m.available);
+    const exact = soldOut.filter((m) => keywords(m.name).every((w) => asked.has(w)));
+    // No full-name match: fall back to the main noun ("croissants" -> any sold-out croissant).
+    const matches = exact.length ? exact : soldOut.filter((m) => asked.has(keywords(m.name).at(-1) ?? ""));
+    if (!matches.length) return [];
+    const names = matches.map((m) => m.name);
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+    return [`Heads up: ${list} ${names.length === 1 ? "is" : "are"} sold out today.`];
+  };
 }

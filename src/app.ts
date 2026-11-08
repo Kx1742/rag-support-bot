@@ -5,7 +5,7 @@ import { ExtractiveChat, LocalEmbedder } from "./llm/offline.ts";
 import { Assistant } from "./rag/assistant.ts";
 import { buildIndex, isIndexFresh } from "./rag/indexer.ts";
 import { loadIndex, saveIndex, VectorStore } from "./rag/vectorStore.ts";
-import { createBookingTools } from "./shop/chatTools.ts";
+import { createBookingTools, soldOutNotices } from "./shop/chatTools.ts";
 import type { Shop } from "./shop/shop.ts";
 import { indexPath, loadTenant } from "./tenant.ts";
 import type { ChatProvider, EmbeddingProvider } from "./types.ts";
@@ -79,5 +79,6 @@ export async function createAssistant(tenantId: string, providers = createProvid
     chat: providers.chat,
     options: { minScore },
     tools: shop ? createBookingTools(shop) : undefined,
+    notices: shop ? soldOutNotices(shop) : undefined,
   });
 }

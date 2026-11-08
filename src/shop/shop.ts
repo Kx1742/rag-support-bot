@@ -5,7 +5,8 @@ import { DATA_DIR } from "../tenant.ts";
 import { BookingService } from "./bookings.ts";
 import { loadShopConfig, type ShopConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
-import { MenuService, OrderService } from "./orders.ts";
+import { MenuService } from "./menu.ts";
+import { OrderService } from "./orders.ts";
 import { StaffService } from "./staff.ts";
 
 export type ShopChange = { kind: "booking" | "order" | "menu"; id: string | number; action: "created" | "updated" };
@@ -37,7 +38,13 @@ export class Shop {
     this.events.setMaxListeners(100); // one listener per open desk screen
     this.bookings = new BookingService({ db: this.db, config: this.config, now, onChange: emit("booking") });
     this.menu = new MenuService({ db: this.db, config: this.config, onChange: emit("menu") });
-    this.orders = new OrderService({ db: this.db, config: this.config, now, onChange: emit("order") });
+    this.orders = new OrderService({
+      db: this.db,
+      config: this.config,
+      now,
+      onChange: emit("order"),
+      onStockChange: (itemId) => emit("menu")(itemId),
+    });
     this.staff = new StaffService({ db: this.db, now });
     this.menu.sync(this.config.menu);
   }

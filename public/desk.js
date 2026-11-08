@@ -142,6 +142,7 @@ async function enterDesk() {
   $("login-view").hidden = true;
   $("desk-view").hidden = false;
   $("desk-title").textContent = prettyName(info.tenantId);
+  $("pickup-link").href = `/display?tenant=${encodeURIComponent(info.tenantId)}`;
   document.title = `Desk · ${prettyName(info.tenantId)}`;
   $("user-chip").replaceChildren(info.user.name, h("b", { class: info.user.role }, info.user.role));
   $("user-chip").title = `Logged in as ${info.user.name} (${info.user.role})`;
@@ -338,7 +339,8 @@ function categoryColor(category) {
 
 async function loadMenu() {
   const data = await api("/menu");
-  state.menu = data.menu;
+  state.menu = data.menu.filter((m) => !m.hidden);
+  state.hiddenMenu = data.menu.filter((m) => m.hidden);
   state.optionGroups = data.optionGroups;
   const categories = [...new Set(state.menu.map((m) => m.category))];
   if (!categories.includes(state.category)) state.category = categories[0] ?? null;
@@ -410,6 +412,7 @@ function renderItems() {
             m.available
               ? h("span", { class: "price" }, m.options.length ? `from ${money(m.price)}` : money(m.price))
               : h("span", { class: "sold-out" }, "Sold out"),
+            m.available && m.stock !== null && m.stock <= 5 ? h("span", { class: "low-stock" }, `${m.stock} left`) : null,
             qty ? h("span", { class: "qty-badge", "aria-hidden": "true" }, String(qty)) : null,
           );
         })
@@ -1318,10 +1321,13 @@ $("booking-form").addEventListener("submit", async (e) => {
 function renderMenuAdmin() {
   const categories = [...new Set(state.menu.map((m) => m.category))];
   const soldOut = state.menu.filter((m) => !m.available);
+  const counted = state.menu.filter((m) => m.stock !== null && m.available);
 
   $("menu-summary").textContent = soldOut.length
     ? `${soldOut.length} item${soldOut.length === 1 ? " is" : "s are"} sold out: ${soldOut.map((m) => m.name).join(", ")}.`
-    : "Everything is available. Tap an item to mark it sold out.";
+    : counted.length
+      ? `Everything is available. Counting stock for ${counted.length} item${counted.length === 1 ? "" : "s"}.`
+      : "Everything is available. Use the switch to mark an item sold out, or Stock to count it down.";
   $("restock-all").replaceWith(
     Object.assign(armButton("Mark all available", "restock-all", restockAll, { armedLabel: "Tap to confirm", className: "btn btn-ghost btn-sm" }), {
       id: "restock-all",
@@ -1332,33 +1338,189 @@ function renderMenuAdmin() {
   $("badge-menu").hidden = soldOut.length === 0;
   $("badge-menu").title = "Sold out items";
 
-  $("menu-admin").replaceChildren(
-    ...categories.map((c) =>
+  const row = (m) =>
+    h(
+      "div",
+      { class: `menu-row${m.available ? "" : " off"}` },
       h(
-        "section",
-        { class: "menu-group", style: { "--cat": categoryColor(c) } },
-        h("h3", {}, c),
-        ...state.menu
-          .filter((m) => m.category === c)
-          .map((m) =>
-            h(
-              "button",
-              {
-                type: "button",
-                class: "menu-row",
-                role: "switch",
-                "aria-checked": String(m.available),
-                disabled: !can("menu.soldOut"),
-                onclick: () => setAvailable(m, !m.available),
-              },
-              h("span", {}, h("span", { class: "m-name" }, m.name), " ", h("span", { class: "m-price" }, money(m.price))),
-              h("span", { class: "m-state" }, m.available ? "Available" : "Sold out"),
-              h("span", { class: "switch", "aria-hidden": "true" }),
-            ),
-          ),
+        "div",
+        { class: "m-info" },
+        h("span", { class: "m-name" }, m.name),
+        h(
+          "span",
+          { class: "m-sub" },
+          money(m.price),
+          m.options.length ? ` · ${m.options.length} option group${m.options.length === 1 ? "" : "s"}` : "",
+          m.stock !== null ? h("span", { class: `stock-chip${m.stock <= 5 ? " low" : ""}` }, `${m.stock} left`) : null,
+        ),
       ),
-    ),
+      can("menu.soldOut") && !m.hidden ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => openStock(m) }, "Stock") : null,
+      can("menu.edit") ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => openItem(m) }, m.hidden ? "Show / edit" : "Edit") : null,
+      m.hidden
+        ? h("span", { class: "m-state" }, "Hidden")
+        : h(
+            "button",
+            {
+              type: "button",
+              class: "switch-btn",
+              role: "switch",
+              "aria-checked": String(m.available),
+              "aria-label": `${m.name} available`,
+              disabled: !can("menu.soldOut"),
+              onclick: () => setAvailable(m, !m.available),
+            },
+            h("span", { class: "m-state" }, m.available ? "Available" : "Sold out"),
+            h("span", { class: "switch", "aria-hidden": "true" }),
+          ),
+    );
+
+  const sections = categories.map((c) =>
+    h("section", { class: "menu-group", style: { "--cat": categoryColor(c) } }, h("h3", {}, c), ...state.menu.filter((m) => m.category === c).map(row)),
   );
+  if (state.hiddenMenu?.length) {
+    sections.push(h("section", { class: "menu-group hidden-group" }, h("h3", {}, "Hidden from the menu"), ...state.hiddenMenu.map(row)));
+  }
+  $("menu-admin").replaceChildren(...sections);
+}
+
+// Stock count sheet (staff and managers).
+const stockDialog = $("stock-dialog");
+let stockItem = null;
+
+function openStock(item) {
+  stockItem = item;
+  $("stock-title").textContent = `Stock · ${item.name}`;
+  $("stock-value").value = item.stock === null ? "" : String(item.stock);
+  $("stock-error").textContent = "";
+  $("stock-untrack").hidden = item.stock === null;
+  $("stock-quick").replaceChildren(
+    ...[6, 12, 24, 48].map((n) => h("button", { type: "button", onclick: () => ($("stock-value").value = String(n)) }, `Set ${n}`)),
+    h("button", { type: "button", onclick: () => ($("stock-value").value = "0") }, "None left"),
+  );
+  stockDialog.showModal();
+  $("stock-value").select();
+}
+
+const stockStep = (d) => ($("stock-value").value = String(Math.max(0, (Number($("stock-value").value) || 0) + d)));
+$("stock-minus").addEventListener("click", () => stockStep(-1));
+$("stock-plus").addEventListener("click", () => stockStep(1));
+$("stock-close").addEventListener("click", () => stockDialog.close());
+$("stock-untrack").addEventListener("click", () => saveStock(null));
+$("stock-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const raw = $("stock-value").value.trim();
+  if (!/^\d+$/.test(raw)) {
+    $("stock-error").textContent = "Enter a whole number, e.g. 12.";
+    return;
+  }
+  saveStock(Number(raw));
+});
+
+async function saveStock(stock) {
+  try {
+    const { item } = await api(`/menu/${encodeURIComponent(stockItem.id)}`, { method: "PATCH", body: { stock } });
+    stockDialog.close();
+    toast(stock === null ? `Stopped counting ${item.name}` : `${item.name}: ${stock} left${stock === 0 ? " (sold out)" : ""}`, { tone: "success" });
+    await loadMenu();
+  } catch (err) {
+    $("stock-error").textContent = err.message;
+  }
+}
+
+// Add / edit item sheet (managers).
+const itemDialog = $("item-dialog");
+let editingItem = null;
+let itemOptions = [];
+
+$("add-item-btn").addEventListener("click", () => openItem(null));
+$("item-close").addEventListener("click", () => itemDialog.close());
+
+function openItem(item) {
+  editingItem = item;
+  itemOptions = item ? [...item.options] : [];
+  $("item-title").textContent = item ? `Edit ${item.name}` : "Add item";
+  $("item-submit").textContent = item ? "Save changes" : "Add item";
+  $("it-name").value = item?.name ?? "";
+  $("it-category").value = item?.category ?? state.category ?? "";
+  $("it-price").value = item ? (item.price / 100).toFixed(2) : "";
+  $("it-stock").value = item?.stock ?? "";
+  $("item-error").textContent = "";
+  $("it-categories").replaceChildren(...[...new Set(state.menu.map((m) => m.category))].map((c) => h("option", { value: c })));
+  renderItemOptions();
+  $("item-hide-slot").replaceChildren(
+    item
+      ? item.hidden
+        ? h("button", { type: "button", class: "btn btn-ghost", onclick: () => setHidden(item, false) }, "Put back on the menu")
+        : armButton("Hide from menu", `hide-${item.id}`, () => setHidden(item, true), { armedLabel: "Tap to confirm", className: "btn btn-danger" })
+      : "",
+  );
+  itemDialog.showModal();
+  $("it-name").focus();
+}
+
+function renderItemOptions() {
+  $("it-options").replaceChildren(
+    ...state.optionGroups.map((g) => {
+      const on = itemOptions.includes(g.id);
+      return h(
+        "button",
+        {
+          type: "button",
+          role: "checkbox",
+          "aria-checked": String(on),
+          onclick: () => {
+            itemOptions = on ? itemOptions.filter((id) => id !== g.id) : [...itemOptions, g.id];
+            renderItemOptions();
+          },
+        },
+        g.name,
+        h("small", {}, g.choices.map((c) => c.name).join(", ")),
+      );
+    }),
+  );
+}
+
+$("item-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("item-error").textContent = "";
+  const price = Number($("it-price").value.replace(/[^0-9.]/g, ""));
+  const stockRaw = String($("it-stock").value).trim();
+  if (!$("it-price").value.trim() || !Number.isFinite(price)) {
+    $("item-error").textContent = "Enter a price, e.g. 4.50.";
+    return;
+  }
+  if (stockRaw && !/^\d+$/.test(stockRaw)) {
+    $("item-error").textContent = "Stock must be a whole number, or empty to not count it.";
+    return;
+  }
+  const body = {
+    name: $("it-name").value,
+    category: $("it-category").value,
+    price: Math.round(price * 100),
+    options: itemOptions,
+    stock: stockRaw === "" ? null : Number(stockRaw),
+  };
+  try {
+    const { item } = editingItem
+      ? await api(`/menu/${encodeURIComponent(editingItem.id)}`, { method: "PATCH", body })
+      : await api("/menu", { method: "POST", body });
+    itemDialog.close();
+    toast(editingItem ? `${item.name} updated` : `${item.name} added to ${item.category}`, { tone: "success" });
+    await loadMenu();
+  } catch (err) {
+    $("item-error").textContent = err.message;
+  }
+});
+
+async function setHidden(item, hidden) {
+  try {
+    await api(`/menu/${encodeURIComponent(item.id)}`, { method: "PATCH", body: { hidden } });
+    itemDialog.close();
+    toast(hidden ? `${item.name} is hidden from the menu` : `${item.name} is back on the menu`, { tone: "success" });
+    await loadMenu();
+  } catch (err) {
+    $("item-error").textContent = err.message;
+  }
 }
 
 async function setAvailable(item, available) {

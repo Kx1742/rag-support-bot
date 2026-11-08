@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Assistant } from "../rag/assistant.ts";
-import type { Shop } from "../shop/shop.ts";
+import type { Shop, ShopChange } from "../shop/shop.ts";
 import { isDate } from "../shop/time.ts";
 import type { TenantConfig } from "../types.ts";
 import type { StaffAuth } from "./auth.ts";
@@ -49,7 +49,14 @@ const STATIC_FILES: Record<string, { file: string; type: string }> = {
   "/desk": { file: "desk.html", type: "text/html; charset=utf-8" },
   "/desk.js": { file: "desk.js", type: "text/javascript; charset=utf-8" },
   "/desk.css": { file: "desk.css", type: "text/css; charset=utf-8" },
+  "/display": { file: "display.html", type: "text/html; charset=utf-8" },
+  "/display.js": { file: "display.js", type: "text/javascript; charset=utf-8" },
+  "/display.css": { file: "display.css", type: "text/css; charset=utf-8" },
 };
+
+/** Public live streams (pickup screens) are capped so nobody can hog connections. */
+const MAX_PUBLIC_STREAMS = 50;
+let publicStreams = 0;
 
 export function createAppServer(deps: ServerDeps): Server {
   const log = deps.log ?? ((m: string) => console.log(m));
@@ -103,7 +110,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     if (handled) return;
   }
 
-  const tenantMatch = /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel))?$/.exec(path);
+  const tenantMatch = /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel|pickup|pickup\/events))?$/.exec(path);
   if (tenantMatch) {
     const tenantId = decodeURIComponent(tenantMatch[1]);
     const assistant = await deps.getAssistant(tenantId);
@@ -129,6 +136,29 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       sendJson(res, 200, { date, partySize, ...shop.bookings.availableTimes(date, partySize) });
       return;
     }
+    // Pickup screen: order numbers only, no names or items.
+    if (action === "pickup" && req.method === "GET") {
+      sendJson(res, 200, { name: assistant.tenant.name, ...shop.orders.pickupBoard() });
+      return;
+    }
+    if (action === "pickup/events" && req.method === "GET") {
+      if (publicStreams >= MAX_PUBLIC_STREAMS) throw new HttpError(503, "Too many screens connected");
+      publicStreams++;
+      startSse(res);
+      sendSse(res, "ready", { ok: true });
+      const onChange = (change: ShopChange) => {
+        if (change.kind === "order") sendSse(res, "change", { kind: "order" });
+      };
+      const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), 25_000);
+      shop.events.on("change", onChange);
+      req.on("close", () => {
+        publicStreams--;
+        clearInterval(heartbeat);
+        shop.events.off("change", onChange);
+      });
+      return;
+    }
+
     // Customers manage their own booking with the reference + phone they booked with.
     if ((action === "bookings/lookup" || action === "bookings/cancel") && req.method === "POST") {
       takeRateLimit(req, res, deps);

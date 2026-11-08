@@ -1,68 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { OptionGroup, ShopConfig } from "./config.ts";
+import type { ShopConfig } from "./config.ts";
 import { transaction } from "./db.ts";
 import { ShopError } from "./errors.ts";
 import { zonedNow } from "./time.ts";
-
-// ---------- Menu ----------
-
-export interface MenuItem {
-  id: string;
-  name: string;
-  category: string;
-  price: number;
-  /** False = sold out today. Staff toggle this on the desk. */
-  available: boolean;
-  /** Option group ids (size, milk...) offered for this item. */
-  options: string[];
-}
-
-export class MenuService {
-  private readonly db: DatabaseSync;
-  private readonly config: ShopConfig;
-  private readonly onChange: (id: string) => void;
-
-  constructor(deps: { db: DatabaseSync; config: ShopConfig; onChange?: (id: string) => void }) {
-    this.db = deps.db;
-    this.config = deps.config;
-    this.onChange = deps.onChange ?? (() => {});
-  }
-
-  /**
-   * Makes the database match shop.json: adds new items, updates names/prices,
-   * hides removed items. Keeps each item's sold-out flag.
-   */
-  sync(items: ShopConfig["menu"]): void {
-    transaction(this.db, () => {
-      this.db.exec("UPDATE menu_items SET active = 0");
-      const upsert = this.db.prepare(
-        `INSERT INTO menu_items (id, name, category, price, sort, active) VALUES (?, ?, ?, ?, ?, 1)
-         ON CONFLICT (id) DO UPDATE SET name = excluded.name, category = excluded.category,
-           price = excluded.price, sort = excluded.sort, active = 1`,
-      );
-      items.forEach((item, i) => upsert.run(item.id, item.name, item.category, item.price, i));
-    });
-  }
-
-  list(): MenuItem[] {
-    const options = new Map(this.config.menu.map((m) => [m.id, m.options ?? []]));
-    const rows = this.db
-      .prepare(`SELECT id, name, category, price, available FROM menu_items WHERE active = 1 ORDER BY sort`)
-      .all() as { id: string; name: string; category: string; price: number; available: number }[];
-    return rows.map((r) => ({ ...r, available: r.available === 1, options: options.get(r.id) ?? [] }));
-  }
-
-  optionGroups(): OptionGroup[] {
-    return this.config.optionGroups ?? [];
-  }
-
-  setAvailable(id: string, available: boolean): MenuItem {
-    const { changes } = this.db.prepare(`UPDATE menu_items SET available = ? WHERE id = ? AND active = 1`).run(available ? 1 : 0, id);
-    if (!changes) throw new ShopError("not_found", "Menu item not found");
-    this.onChange(id);
-    return this.list().find((m) => m.id === id)!;
-  }
-}
 
 // ---------- Orders ----------
 
@@ -167,17 +107,21 @@ export class OrderService {
   private readonly config: ShopConfig;
   private readonly now: () => Date;
   private readonly onChange: (id: number, action: "created" | "updated") => void;
+  private readonly onStockChange: (itemId: string) => void;
 
   constructor(deps: {
     db: DatabaseSync;
     config: ShopConfig;
     now: () => Date;
     onChange?: (id: number, action: "created" | "updated") => void;
+    /** Called when an order changes an item's stock count (so the menu can refresh). */
+    onStockChange?: (itemId: string) => void;
   }) {
     this.db = deps.db;
     this.config = deps.config;
     this.now = deps.now;
     this.onChange = deps.onChange ?? (() => {});
+    this.onStockChange = deps.onStockChange ?? (() => {});
   }
 
   /**
@@ -207,11 +151,13 @@ export class OrderService {
     const total = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
     if (opts.payment) this.checkPayment(opts.payment, total);
 
+    let stockTouched: string[] = [];
     const id = transaction(this.db, () => {
       if (opts.clientRef) {
         const raced = this.byClientRef(opts.clientRef);
         if (raced) return raced.id;
       }
+      stockTouched = this.takeStock(lines);
       const businessDate = zonedNow(this.config.timezone, this.now()).date;
       const { next } = this.db
         .prepare(`SELECT COALESCE(MAX(number), 0) + 1 AS next FROM orders WHERE business_date = ?`)
@@ -232,6 +178,7 @@ export class OrderService {
       return orderId;
     });
     this.onChange(id, "created");
+    for (const itemId of stockTouched) this.onStockChange(itemId);
     return this.get(id)!;
   }
 
@@ -255,13 +202,17 @@ export class OrderService {
     const why = String(reason ?? "").trim();
     if (!why || why.length > 200) throw new ShopError("invalid_reason", "Give a reason for the refund (up to 200 characters).");
     const stamp = this.now().toISOString();
-    this.db
-      .prepare(
-        `UPDATE orders SET payment_status = 'refunded', refunded_at = ?, refunded_by = ?, refund_reason = ?,
-           status = 'cancelled', updated_at = ? WHERE id = ?`,
-      )
-      .run(stamp, by?.name ?? "", why, stamp, id);
+    const restored = transaction(this.db, () => {
+      this.db
+        .prepare(
+          `UPDATE orders SET payment_status = 'refunded', refunded_at = ?, refunded_by = ?, refund_reason = ?,
+             status = 'cancelled', updated_at = ? WHERE id = ?`,
+        )
+        .run(stamp, by?.name ?? "", why, stamp, id);
+      return order.status === "cancelled" ? [] : this.returnStock(order.items);
+    });
     this.onChange(id, "updated");
+    for (const itemId of restored) this.onStockChange(itemId);
     return this.get(id)!;
   }
 
@@ -285,9 +236,27 @@ export class OrderService {
     if (!ORDER_TRANSITIONS[order.status].includes(status)) {
       throw new ShopError("invalid_status", `Can't change a ${order.status} order to ${status}.`);
     }
-    this.db.prepare(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ?`).run(status, this.now().toISOString(), id);
+    const restored = transaction(this.db, () => {
+      this.db.prepare(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ?`).run(status, this.now().toISOString(), id);
+      return status === "cancelled" ? this.returnStock(order.items) : [];
+    });
     this.onChange(id, "updated");
+    for (const itemId of restored) this.onStockChange(itemId);
     return this.get(id)!;
+  }
+
+  /**
+   * What the customer pickup screen may show: today's order numbers only
+   * (no names or items), split into "being made" and "ready to collect".
+   */
+  pickupBoard(): { preparing: number[]; ready: number[] } {
+    const numbers = (sql: string) =>
+      (this.db.prepare(sql).all(this.today()) as { number: number }[]).map((r) => r.number);
+    return {
+      preparing: numbers(`SELECT number FROM orders WHERE business_date = ? AND status IN ('new', 'preparing') ORDER BY id`),
+      // Most recently called first, so the newest "ready" number is the easiest to spot.
+      ready: numbers(`SELECT number FROM orders WHERE business_date = ? AND status = 'ready' ORDER BY updated_at DESC, id DESC`),
+    };
   }
 
   /** Quick numbers for the desk. Money figures are for managers; the API hides them from staff. */
@@ -359,16 +328,16 @@ export class OrderService {
 
   /** Validates one line and prices it from the menu + chosen options. */
   private priceLine(line: OrderLineInput): Omit<OrderLine, "optionsLabel" | "lineTotal"> {
-    const item = this.db.prepare(`SELECT id, name, price, available FROM menu_items WHERE id = ? AND active = 1`).get(String(line?.itemId ?? "")) as
-      | { id: string; name: string; price: number; available: number }
-      | undefined;
+    const item = this.db
+      .prepare(`SELECT id, name, price, available, options FROM menu_items WHERE id = ? AND active = 1`)
+      .get(String(line?.itemId ?? "")) as { id: string; name: string; price: number; available: number; options: string | null } | undefined;
     if (!item) throw new ShopError("invalid_item", `Unknown menu item "${line?.itemId}"`);
     if (!item.available) throw new ShopError("sold_out", `${item.name} is sold out.`);
     if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 50) {
       throw new ShopError("invalid_quantity", "Quantity must be between 1 and 50.");
     }
 
-    const allowed = this.config.menu.find((m) => m.id === item.id)?.options ?? [];
+    const allowed: string[] = item.options === null ? (this.config.menu.find((m) => m.id === item.id)?.options ?? []) : JSON.parse(item.options);
     const groups = new Map((this.config.optionGroups ?? []).map((g) => [g.id, g]));
     const requested = line.options && typeof line.options === "object" ? line.options : {};
     for (const groupId of Object.keys(requested)) {
@@ -403,6 +372,41 @@ export class OrderService {
       note: String(line.note ?? "").trim().slice(0, 100),
       options: chosen,
     };
+  }
+
+  /** Counts down stock for counted items. Throws if there isn't enough. Returns the item ids touched. */
+  private takeStock(lines: { itemId: string; name: string; quantity: number }[]): string[] {
+    const wanted = new Map<string, { name: string; quantity: number }>();
+    for (const l of lines) {
+      const w = wanted.get(l.itemId) ?? { name: l.name, quantity: 0 };
+      w.quantity += l.quantity;
+      wanted.set(l.itemId, w);
+    }
+    const touched: string[] = [];
+    for (const [itemId, { name, quantity }] of wanted) {
+      const row = this.db.prepare(`SELECT stock FROM menu_items WHERE id = ?`).get(itemId) as { stock: number | null };
+      if (row.stock === null) continue;
+      if (row.stock < quantity) {
+        throw new ShopError("low_stock", row.stock === 0 ? `${name} is sold out.` : `Only ${row.stock} ${name} left.`);
+      }
+      this.db
+        .prepare(`UPDATE menu_items SET stock = stock - ?, available = CASE WHEN stock - ? <= 0 THEN 0 ELSE available END WHERE id = ?`)
+        .run(quantity, quantity, itemId);
+      touched.push(itemId);
+    }
+    return touched;
+  }
+
+  /** Puts stock back when an order is cancelled or refunded. */
+  private returnStock(items: OrderLine[]): string[] {
+    const touched = new Set<string>();
+    for (const l of items) {
+      const { changes } = this.db
+        .prepare(`UPDATE menu_items SET stock = stock + ?, available = 1 WHERE id = ? AND stock IS NOT NULL`)
+        .run(l.quantity, l.itemId);
+      if (changes) touched.add(l.itemId);
+    }
+    return [...touched];
   }
 
   private checkPayment(payment: PaymentInput, total: number): void {
