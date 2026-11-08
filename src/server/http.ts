@@ -110,7 +110,8 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     if (handled) return;
   }
 
-  const tenantMatch = /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel|pickup|pickup\/events))?$/.exec(path);
+  const tenantMatch =
+    /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel|pickup|pickup\/events|menu|orders|loyalty))?$/.exec(path);
   if (tenantMatch) {
     const tenantId = decodeURIComponent(tenantMatch[1]);
     const assistant = await deps.getAssistant(tenantId);
@@ -136,6 +137,48 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       sendJson(res, 200, { date, partySize, ...shop.bookings.availableTimes(date, partySize) });
       return;
     }
+    // Order ahead: the public menu (available items only) and today's pickup times.
+    if (action === "menu" && req.method === "GET") {
+      const menu = shop.menu
+        .list()
+        .filter((m) => m.available)
+        .map(({ id, name, category, price, options, stock }) => ({ id, name, category, price, options, lowStock: stock !== null && stock <= 5 ? stock : null }));
+      sendJson(res, 200, { menu, optionGroups: shop.menu.optionGroups(), ordering: shop.orders.pickupSlots() });
+      return;
+    }
+    if (action === "orders" && req.method === "POST") {
+      takeRateLimit(req, res, deps);
+      const b = await readObject(req);
+      const order = shop.orders.createOnline(
+        {
+          name: String(b.name ?? ""),
+          phone: String(b.phone ?? ""),
+          pickupTime: String(b.pickupTime ?? ""),
+          notes: String(b.notes ?? ""),
+          items: Array.isArray(b.items)
+            ? b.items.map((i: { itemId?: unknown; quantity?: unknown; note?: unknown; options?: unknown }) => ({
+                itemId: String(i?.itemId ?? ""),
+                quantity: Number(i?.quantity),
+                note: String(i?.note ?? ""),
+                options: i?.options && typeof i.options === "object" && !Array.isArray(i.options) ? (i.options as Record<string, string | string[]>) : {},
+              }))
+            : [],
+        },
+        b.clientRef === undefined ? undefined : String(b.clientRef),
+      );
+      sendJson(res, 201, { order: shop.orders.toPublic(order) });
+      return;
+    }
+    // Loyalty balance: points and rewards only (no name or history), by phone number.
+    if (action === "loyalty" && req.method === "POST") {
+      takeRateLimit(req, res, deps);
+      if (!shop.loyalty.enabled) throw new HttpError(404, "This business doesn't have a loyalty program.");
+      const member = shop.loyalty.find(String((await readObject(req)).phone ?? ""));
+      if (!member) throw new HttpError(404, "No member with that phone number. Ask at the counter to join, it's free.");
+      sendJson(res, 200, shop.loyalty.summary(member));
+      return;
+    }
+
     // Pickup screen: order numbers only, no names or items.
     if (action === "pickup" && req.method === "GET") {
       sendJson(res, 200, { name: assistant.tenant.name, ...shop.orders.pickupBoard() });
@@ -237,6 +280,8 @@ export function publicTenantInfo(t: TenantConfig, shop: Shop | null = null, canU
     /** True when the chat assistant itself can make and cancel bookings. */
     chatBookings: !!shop && canUseTools,
     brandColor: t.brandColor && /^#[0-9a-f]{6}$/i.test(t.brandColor) ? t.brandColor : null,
+    orderAhead: !!shop?.config.orderAhead,
+    loyalty: shop?.config.loyalty ? { name: shop.config.loyalty.name } : null,
     booking: shop
       ? {
           today: shop.bookings.today().date,

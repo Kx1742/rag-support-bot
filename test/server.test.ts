@@ -162,6 +162,8 @@ describe("HTTP server", () => {
       suggestedQuestions: ["Hours?"],
       chatBookings: false,
       brandColor: null,
+      orderAhead: false,
+      loyalty: null,
       booking: null,
     });
     assert.equal((await fetch(`${base}/api/tenants/nope`)).status, 404);

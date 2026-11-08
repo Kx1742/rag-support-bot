@@ -39,6 +39,8 @@ const state = {
   orderType: "takeaway",
   orderTable: null,
   pendingRef: null, // idempotency key: reused if the same order is retried
+  member: null, // { id, name, phone, points, summary } attached to the ticket
+  rewardId: null,
   lastSentAt: 0,
   // orders
   orders: [],
@@ -259,7 +261,7 @@ function onChange(change) {
   }
   if (change.order && Date.now() - state.lastSentAt > 3000) {
     chime();
-    toast(`New order #${pad(change.order.number)}${change.order.by ? ` from ${change.order.by}` : ""}`, {
+    toast(change.order.source === "online" ? `New online order #${pad(change.order.number)}` : `New order #${pad(change.order.number)}${change.order.by ? ` from ${change.order.by}` : ""}`, {
       tone: "alert",
       action: { label: "View", run: () => showTab("orders") },
     });
@@ -506,24 +508,54 @@ function renderTicket(flashKey) {
   );
   const count = lines.reduce((n, l) => n + l.line.qty, 0);
   const total = ticketTotal();
-  $("ticket-count").textContent = `${count} item${count === 1 ? "" : "s"}`;
+  const reward = rewardPreview();
+  $("ticket-count").textContent = reward.discount
+    ? `${count} item${count === 1 ? "" : "s"} · ${money(reward.discount)} off`
+    : `${count} item${count === 1 ? "" : "s"}`;
   $("ticket-total").textContent = money(total);
+  renderMemberSlot(reward);
   $("empty-ticket").hidden = lines.length > 0;
   $("ticket-lines").hidden = lines.length === 0;
 
   const needsTable = state.orderType === "dine_in" && !state.orderTable;
-  const blocked = lines.length === 0 || needsTable;
+  const blocked = lines.length === 0 || needsTable || !!reward.missing;
   $("charge-order").disabled = blocked;
   $("send-order").disabled = blocked;
-  $("charge-order").textContent = lines.length === 0 ? "Charge" : needsTable ? "Choose a table" : `Charge ${money(total)}`;
+  $("charge-order").textContent =
+    lines.length === 0 ? "Charge" : needsTable ? "Choose a table" : reward.missing ? `Add a ${reward.missing} for the reward` : `Charge ${money(total)}`;
   $("send-order").textContent = state.orderType === "dine_in" ? "Send to kitchen, pay later" : "Send without paying";
 }
 
-function ticketTotal() {
+function ticketSubtotal() {
   return state.ticket.reduce((sum, line) => {
     const item = state.menu.find((m) => m.id === line.itemId);
     return item ? sum + unitPrice(item, line.options) * line.qty : sum;
   }, 0);
+}
+
+/** What the customer pays after a reward. The server re-checks this. */
+function ticketTotal() {
+  return ticketSubtotal() - rewardPreview().discount;
+}
+
+/** Same rule as the server: each reward part makes the most expensive matching unit free. */
+function rewardPreview() {
+  const reward = state.rewardId ? state.info.loyalty?.rewards.find((r) => r.id === state.rewardId) : null;
+  if (!reward) return { discount: 0, missing: null };
+  const units = state.ticket.flatMap((line) => {
+    const item = state.menu.find((m) => m.id === line.itemId);
+    return item ? Array.from({ length: line.qty }, () => ({ item, price: unitPrice(item, line.options), used: false })) : [];
+  });
+  let discount = 0;
+  for (const part of reward.parts) {
+    const match = units
+      .filter((u) => !u.used && (part.items?.includes(u.item.id) || part.categories?.includes(u.item.category)))
+      .sort((a, b) => b.price - a.price)[0];
+    if (!match) return { discount: 0, missing: part.label };
+    match.used = true;
+    discount += match.price;
+  }
+  return { discount, missing: null };
 }
 
 // Options sheet: size, milk, extras. Defaults are pre-selected so "Add" works in one tap.
@@ -661,6 +693,8 @@ $("clear-ticket").addEventListener("click", () => {
 
 function resetTicket() {
   state.ticket = [];
+  state.member = null;
+  state.rewardId = null;
   state.orderTable = null;
   state.pendingRef = null;
   $("order-name").value = "";
@@ -679,6 +713,8 @@ function orderBody(payment) {
     customerName: $("order-name").value,
     notes: $("order-notes").value,
     items: state.ticket.map((l) => ({ itemId: l.itemId, quantity: l.qty, note: l.note, options: l.options })),
+    memberId: state.member?.id ?? null,
+    rewardId: state.member ? state.rewardId : null,
     payment,
   };
 }
@@ -690,7 +726,7 @@ async function submitOrder(payment) {
   const change = order.payment.change;
   toast(
     payment
-      ? `Order #${pad(order.number)} paid${payment.method === "cash" && change ? ` · change ${money(change)}` : ""} · sent to the kitchen`
+      ? `Order #${pad(order.number)} paid${payment.method === "cash" && change ? ` · change ${money(change)}` : ""}${order.pointsEarned ? ` · +${order.pointsEarned} pts` : ""} · sent to the kitchen`
       : `Order #${pad(order.number)} sent to the kitchen · ${money(order.total)} unpaid`,
     { tone: "success" },
   );
@@ -820,6 +856,157 @@ $("pay-form").addEventListener("submit", async (e) => {
   }
 });
 
+// ---------- Loyalty at the till ----------
+
+function renderMemberSlot(reward) {
+  const slot = $("member-slot");
+  if (!state.info?.loyalty || !can("loyalty.use")) {
+    slot.hidden = true;
+    return;
+  }
+  slot.hidden = false;
+  if (!state.member) {
+    slot.replaceChildren(h("button", { type: "button", class: "btn btn-ghost btn-sm btn-block", onclick: openLoyalty }, `★ Add ${state.info.loyalty.name} member`));
+    return;
+  }
+  const m = state.member;
+  const rewardObj = state.info.loyalty.rewards.find((r) => r.id === state.rewardId);
+  const earn = Math.floor(ticketTotal() / 100) * state.info.loyalty.pointsPerDollar;
+  slot.replaceChildren(
+    h(
+      "div",
+      { class: "member-card" },
+      h(
+        "div",
+        { class: "member-top" },
+        h("strong", {}, `★ ${m.name || "Member"}`),
+        h("span", { class: "muted" }, `${m.points} pts`),
+        h("button", { type: "button", class: "link-btn", onclick: openLoyalty }, "Change"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "link-btn",
+            onclick: () => {
+              state.member = null;
+              state.rewardId = null;
+              state.pendingRef = null;
+              renderTicket();
+            },
+          },
+          "Remove",
+        ),
+      ),
+      rewardObj
+        ? h(
+            "div",
+            { class: `member-reward${reward.missing ? " warn" : ""}` },
+            reward.missing ? `${rewardObj.name}: add a ${reward.missing}` : `${rewardObj.name} −${money(reward.discount)} (−${rewardObj.points} pts)`,
+          )
+        : null,
+      state.ticket.length ? h("div", { class: "member-earn" }, `Earns ${earn} pts when paid`) : null,
+    ),
+  );
+}
+
+const loyaltyDialog = $("loyalty-dialog");
+
+function openLoyalty() {
+  $("ly-error").textContent = "";
+  $("ly-phone").value = state.member?.phone ?? "";
+  if (state.member) showMember(state.member);
+  else $("ly-result").replaceChildren();
+  loyaltyDialog.showModal();
+  $("ly-phone").focus();
+}
+
+$("loyalty-close").addEventListener("click", () => loyaltyDialog.close());
+$("loyalty-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("ly-error").textContent = "";
+  const phone = $("ly-phone").value.trim();
+  if (!phone) return;
+  try {
+    const data = await api(`/loyalty?phone=${encodeURIComponent(phone)}`);
+    showMember({ ...data.member, summary: data.summary, history: data.history });
+  } catch (err) {
+    if (/No member/.test(err.message)) showJoin(phone);
+    else $("ly-error").textContent = err.message;
+  }
+});
+
+function showJoin(phone) {
+  const name = h("input", { class: "input", maxlength: "60", placeholder: "Name (optional)", autocomplete: "off" });
+  $("ly-result").replaceChildren(
+    h(
+      "div",
+      { class: "join-box" },
+      h("p", {}, `No member with ${phone} yet. Join for free?`),
+      name,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-primary btn-block",
+          onclick: async () => {
+            try {
+              const data = await api("/loyalty", { method: "POST", body: { phone, name: name.value } });
+              toast(`Welcome to ${state.info.loyalty.name}${data.member.name ? `, ${data.member.name}` : ""}!`, { tone: "success" });
+              attachMember({ ...data.member, summary: data.summary }, null);
+            } catch (err) {
+              $("ly-error").textContent = err.message;
+            }
+          },
+        },
+        "Join & add to order",
+      ),
+    ),
+  );
+  name.focus();
+}
+
+function showMember(m) {
+  const summary = m.summary;
+  $("ly-result").replaceChildren(
+    h(
+      "div",
+      { class: "member-found" },
+      h("div", { class: "member-points" }, h("strong", {}, String(summary.points)), h("span", {}, "points")),
+      h("div", {}, h("strong", {}, m.name || "Member"), h("div", { class: "muted" }, m.phone)),
+      summary.nextReward ? h("p", { class: "muted" }, `${summary.nextReward.pointsNeeded} more points for ${summary.nextReward.name}`) : null,
+    ),
+    h(
+      "div",
+      { class: "reward-list" },
+      h("button", { type: "button", class: "reward-opt", onclick: () => attachMember(m, null) }, h("strong", {}, "Earn points only"), h("small", {}, "No reward this time")),
+      ...summary.rewards.map((r) =>
+        h(
+          "button",
+          { type: "button", class: "reward-opt", disabled: !r.affordable, onclick: () => attachMember(m, r.id) },
+          h("strong", {}, r.name),
+          h("small", {}, r.affordable ? `Use ${r.points} pts` : `Needs ${r.points} pts`),
+        ),
+      ),
+    ),
+    m.history?.length
+      ? h(
+          "details",
+          { class: "member-history" },
+          h("summary", {}, "Recent points"),
+          h("ul", {}, ...m.history.map((x) => h("li", {}, h("b", {}, x.delta > 0 ? `+${x.delta}` : String(x.delta)), ` ${x.reason}`))),
+        )
+      : null,
+  );
+}
+
+function attachMember(m, rewardId) {
+  state.member = { id: m.id, name: m.name, phone: m.phone, points: m.summary?.points ?? m.points, summary: m.summary };
+  state.rewardId = rewardId;
+  state.pendingRef = null;
+  loyaltyDialog.close();
+  renderTicket();
+}
+
 // ---------- Orders (kitchen display) ----------
 
 const NEXT_STEP = {
@@ -940,6 +1127,15 @@ function orderCard(o, isNew) {
         ? h("span", { class: `chip timer ${timerClass}`, title: "Waiting time" }, age < 1 ? "now" : `${age} min`)
         : h("span", { class: "chip timer" }, o.status === "completed" ? "Done" : "Cancelled"),
     ),
+    o.source === "online"
+      ? h(
+          "div",
+          { class: "online-line" },
+          h("span", { class: "chip online" }, "Online"),
+          `Pickup ${o.pickupTime === "asap" ? "ASAP" : o.pickupTime}`,
+          o.customerPhone ? h("a", { href: `tel:${o.customerPhone}` }, o.customerPhone) : null,
+        )
+      : null,
     o.customerName ? h("div", { class: "order-who" }, o.customerName) : null,
     h(
       "ul",
@@ -954,6 +1150,8 @@ function orderCard(o, isNew) {
       { class: "order-meta" },
       h("strong", {}, money(o.total)),
       paymentChip(o),
+      o.member ? h("span", { class: "chip member" }, `★ ${o.member.name}${o.pointsEarned ? ` +${o.pointsEarned}` : ""}`) : null,
+      o.reward ? h("span", { class: "chip reward" }, `${o.reward.name} −${money(o.discount)}`) : null,
       o.createdBy ? h("span", {}, `by ${o.createdBy}`) : null,
       o.payment.status === "refunded" ? h("span", {}, `refunded by ${o.payment.refundedBy}: ${o.payment.refundReason}`) : null,
     ),
@@ -1567,6 +1765,8 @@ function renderReport() {
     stat(money(s.card), "card"),
     stat(money(s.unpaidTotal), `unpaid (${s.unpaid})`, s.unpaid ? "warn" : ""),
     stat(money(s.refunds), "refunded", s.refunds ? "late" : ""),
+    stat(money(s.rewards ?? 0), "loyalty rewards given"),
+    stat(String(s.online ?? 0), "online orders"),
   );
 
   $("report-items").replaceChildren(

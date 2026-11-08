@@ -104,6 +104,7 @@
           <div class="table-chips" id="table-chips" hidden role="radiogroup" aria-label="Table"></div>
 
           <input class="input" id="order-name" maxlength="60" placeholder="Customer name (optional)" aria-label="Customer name" />
+          <div class="member-slot" id="member-slot" data-perm="loyalty.use" hidden></div>
 
           <ul class="ticket-lines" id="ticket-lines"></ul>
           <div class="ticket-empty" id="empty-ticket">
@@ -326,6 +327,26 @@
           <button class="btn btn-ghost" type="button" id="refund-cancel">Back</button>
           <button class="btn btn-danger btn-lg" type="submit" id="refund-submit">Refund &amp; cancel order</button>
         </footer>
+      </form>
+    </dialog>
+
+    <!-- Loyalty member -->
+    <dialog class="sheet sheet-sm" id="loyalty-dialog" aria-labelledby="loyalty-title">
+      <form id="loyalty-form" method="dialog">
+        <header class="sheet-head">
+          <h2 id="loyalty-title">Loyalty member</h2>
+          <button class="icon-btn" type="button" id="loyalty-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <div class="lookup-row">
+            <input class="input" id="ly-phone" type="tel" inputmode="tel" placeholder="Customer's phone number" autocomplete="off" aria-label="Phone number" />
+            <button class="btn btn-primary" type="submit" id="ly-find">Find</button>
+          </div>
+          <div id="ly-result"></div>
+          <p class="error" id="ly-error" role="alert"></p>
+        </div>
       </form>
     </dialog>
 

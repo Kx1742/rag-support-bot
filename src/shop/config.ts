@@ -54,6 +54,34 @@ export interface ShopConfig {
   tables: TableConfig[];
   menu: MenuItemConfig[];
   optionGroups?: OptionGroup[];
+  /** Optional loyalty program. Leave out to turn loyalty off. */
+  loyalty?: LoyaltyConfig;
+  /** Optional order-ahead (pickup) settings. Leave out to turn online ordering off. */
+  orderAhead?: {
+    /** Minutes needed to make an order; earliest pickup is now + this. */
+    prepMinutes: number;
+    /** Most items (units) in one online order. */
+    maxItems: number;
+    /** Most open online orders per phone number at once. */
+    maxOpenPerPhone: number;
+  };
+}
+
+/** One reward, e.g. "Free drink" for 100 points. Each part makes one matching item free. */
+export interface LoyaltyReward {
+  id: string;
+  name: string;
+  points: number;
+  /** e.g. [{ categories: ["Coffee"], label: "coffee" }, { categories: ["Food"], label: "food item" }] for a combo. */
+  parts: { label: string; categories?: string[]; items?: string[] }[];
+}
+
+export interface LoyaltyConfig {
+  name: string;
+  pointsPerDollar: number;
+  /** Points expire after this many months without any activity. */
+  expiryMonths: number;
+  rewards: LoyaltyReward[];
 }
 
 /** Loads tenants/<id>/shop.json. Returns null when the tenant has no shop features. */
@@ -126,5 +154,27 @@ export function validateShopConfig(c: ShopConfig): void {
       if (!groups.has(groupId)) fail(`menu item ${m.id} uses unknown option group "${groupId}"`);
     }
     itemIds.add(m.id);
+  }
+
+  if (c.loyalty) {
+    const l = c.loyalty;
+    if (!Number.isInteger(l.pointsPerDollar) || l.pointsPerDollar < 1) fail("loyalty.pointsPerDollar must be a whole number >= 1");
+    if (!Number.isInteger(l.expiryMonths) || l.expiryMonths < 1) fail("loyalty.expiryMonths must be a whole number >= 1");
+    const rewardIds = new Set<string>();
+    for (const r of l.rewards ?? []) {
+      if (!/^[a-z0-9-]+$/.test(r.id) || rewardIds.has(r.id)) fail(`duplicate or invalid reward id "${r.id}"`);
+      if (!Number.isInteger(r.points) || r.points < 1) fail(`reward ${r.id} needs points >= 1`);
+      if (!r.parts?.length) fail(`reward ${r.id} needs at least one part`);
+      for (const p of r.parts) {
+        if (!p.label || (!p.categories?.length && !p.items?.length)) fail(`reward ${r.id} parts need a label and categories or items`);
+      }
+      rewardIds.add(r.id);
+    }
+  }
+  if (c.orderAhead) {
+    const o = c.orderAhead;
+    for (const key of ["prepMinutes", "maxItems", "maxOpenPerPhone"] as const) {
+      if (!Number.isInteger(o[key]) || o[key] < 1) fail(`orderAhead.${key} must be a whole number >= 1`);
+    }
   }
 }

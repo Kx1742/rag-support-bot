@@ -334,6 +334,72 @@ describe("desk and booking HTTP API", async () => {
     assert.equal((await fetch(`${base}/display`)).status, 200);
   });
 
+  it("staff add loyalty members and redeem rewards at the till", async () => {
+    const leo = (await login({ username: "leo", pin: "6284" })).cookie;
+    assert.equal((await desk("/loyalty?phone=5550108888", { cookie: leo })).status, 404);
+
+    const joined = await desk("/loyalty", { method: "POST", body: { phone: "555 010 8888", name: "Robin" }, cookie: leo });
+    assert.equal(joined.status, 201);
+    const { member } = await joined.json();
+    shop.loyalty.change(member.id, 60, "Test bonus");
+
+    const order = await desk("/orders", {
+      method: "POST",
+      cookie: leo,
+      body: { type: "takeaway", items: [{ itemId: "banana-bread", quantity: 1 }], memberId: member.id, rewardId: "pastry", payment: { method: "card" } },
+    });
+    assert.equal(order.status, 201);
+    const o = (await order.json()).order;
+    assert.deepEqual([o.total, o.discount, o.reward.name], [0, 375, "Free pastry"]);
+
+    const lookup = await (await desk("/loyalty?phone=5550108888", { cookie: leo })).json();
+    assert.equal(lookup.summary.points, 10);
+    assert.ok(lookup.history.some((h: { reason: string }) => h.reason.startsWith("Redeemed Free pastry")));
+
+    const broke = await desk("/orders", {
+      method: "POST",
+      cookie: leo,
+      body: { type: "takeaway", items: [{ itemId: "banana-bread", quantity: 1 }], memberId: member.id, rewardId: "pastry" },
+    });
+    assert.equal(broke.status, 409);
+  });
+
+  it("customers order ahead and check points without seeing anyone's details", async () => {
+    const post = (path: string, body: object) =>
+      fetch(`${base}/api/tenants/${tenant.id}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+    const menu = await (await fetch(`${base}/api/tenants/${tenant.id}/menu`)).json();
+    assert.ok(menu.menu.length > 5 && menu.ordering.open);
+    assert.ok(menu.menu.every((m: { available?: boolean; stock?: unknown }) => !("stock" in m)), "exact stock isn't public");
+
+    const placed = await post("orders", {
+      name: "Robin",
+      phone: "5550108888",
+      pickupTime: "asap",
+      items: [{ itemId: "latte", quantity: 1, options: { size: "large" } }],
+    });
+    assert.equal(placed.status, 201);
+    const { order } = await placed.json();
+    assert.equal(order.total, 545);
+    assert.equal(order.memberPoints, true);
+    assert.deepEqual(Object.keys(order).sort(), ["items", "memberPoints", "number", "pickupTime", "status", "total"]);
+
+    const desks = await (await desk("/orders", { cookie: managerCookie })).json();
+    const seen = desks.orders.find((x: { number: number }) => x.number === order.number);
+    assert.equal(seen.source, "online");
+    assert.equal(seen.customerPhone, "5550108888");
+
+    const points = await post("loyalty", { phone: "555-010-8888" });
+    const body = await points.json();
+    assert.equal(body.points, 10);
+    assert.ok(!JSON.stringify(body).includes("Robin"), "no name in the public answer");
+    assert.equal((await post("loyalty", { phone: "5550100001" })).status, 404);
+
+    const info = await (await fetch(`${base}/api/tenants/${tenant.id}`)).json();
+    assert.equal(info.orderAhead, true);
+    assert.deepEqual(info.loyalty, { name: "Byte Points" });
+  });
+
   it("customers can look up and cancel only their own booking", async () => {
     const post = (path: string, body: object) =>
       fetch(`${base}/api/tenants/${tenant.id}/bookings/${path}`, {

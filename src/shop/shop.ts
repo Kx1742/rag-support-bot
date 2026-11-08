@@ -5,6 +5,7 @@ import { DATA_DIR } from "../tenant.ts";
 import { BookingService } from "./bookings.ts";
 import { loadShopConfig, type ShopConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
+import { LoyaltyService } from "./loyalty.ts";
 import { MenuService } from "./menu.ts";
 import { OrderService } from "./orders.ts";
 import { StaffService } from "./staff.ts";
@@ -22,6 +23,7 @@ export class Shop {
   readonly menu: MenuService;
   readonly orders: OrderService;
   readonly staff: StaffService;
+  readonly loyalty: LoyaltyService;
   readonly events = new EventEmitter();
   private readonly db: DatabaseSync;
 
@@ -38,7 +40,9 @@ export class Shop {
     this.events.setMaxListeners(100); // one listener per open desk screen
     this.bookings = new BookingService({ db: this.db, config: this.config, now, onChange: emit("booking") });
     this.menu = new MenuService({ db: this.db, config: this.config, onChange: emit("menu") });
+    this.loyalty = new LoyaltyService({ db: this.db, config: this.config.loyalty, now });
     this.orders = new OrderService({
+      loyalty: this.loyalty,
       db: this.db,
       config: this.config,
       now,

@@ -13,6 +13,7 @@ export const PERMISSIONS = {
   "payments.take": "Take cash or card payments",
   "payments.refund": "Refund paid orders",
   "bookings.manage": "Create, seat and cancel bookings",
+  "loyalty.use": "Look up and add loyalty members, redeem rewards",
   "menu.soldOut": "Mark items sold out and set stock counts",
   "menu.edit": "Add menu items, change prices and options, hide items",
   "sales.view": "See sales totals",
@@ -23,7 +24,7 @@ export const PERMISSIONS = {
 export type Permission = keyof typeof PERMISSIONS;
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  staff: ["till.use", "orders.manage", "payments.take", "bookings.manage", "menu.soldOut"],
+  staff: ["till.use", "orders.manage", "payments.take", "bookings.manage", "loyalty.use", "menu.soldOut"],
   manager: Object.keys(PERMISSIONS) as Permission[],
 };
 

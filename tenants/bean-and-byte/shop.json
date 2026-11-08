@@ -326,5 +326,66 @@
         }
       ]
     }
-  ]
+  ],
+  "loyalty": {
+    "name": "Byte Points",
+    "pointsPerDollar": 1,
+    "expiryMonths": 12,
+    "rewards": [
+      {
+        "id": "pastry",
+        "name": "Free pastry",
+        "points": 50,
+        "parts": [
+          {
+            "label": "pastry",
+            "items": [
+              "croissant",
+              "almond-croissant",
+              "banana-bread",
+              "brownie"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "drink",
+        "name": "Free drink (any size)",
+        "points": 100,
+        "parts": [
+          {
+            "label": "drink",
+            "categories": [
+              "Coffee",
+              "Not Coffee"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "combo",
+        "name": "Free breakfast combo",
+        "points": 250,
+        "parts": [
+          {
+            "label": "coffee",
+            "categories": [
+              "Coffee"
+            ]
+          },
+          {
+            "label": "food item",
+            "categories": [
+              "Food"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "orderAhead": {
+    "prepMinutes": 10,
+    "maxItems": 20,
+    "maxOpenPerPhone": 3
+  }
 }

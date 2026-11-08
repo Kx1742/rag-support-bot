@@ -1,8 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
+import { normalizePhone } from "./bookings.ts";
 import type { ShopConfig } from "./config.ts";
 import { transaction } from "./db.ts";
 import { ShopError } from "./errors.ts";
-import { zonedNow } from "./time.ts";
+import { type LoyaltyService, rewardDiscount } from "./loyalty.ts";
+import { fromMinutes, isTime, toMinutes, weekdayOf, zonedNow } from "./time.ts";
 
 // ---------- Orders ----------
 
@@ -66,11 +68,37 @@ export interface Order {
   customerName: string;
   notes: string;
   status: OrderStatus;
+  /** Before any reward. */
+  subtotal: number;
+  /** Taken off by a loyalty reward. */
+  discount: number;
+  /** What the customer pays: subtotal - discount. */
   total: number;
   items: OrderLine[];
   payment: Payment;
+  /** Loyalty member attached to the order, if any. */
+  member: { id: number; name: string } | null;
+  reward: { id: string; name: string; points: number } | null;
+  pointsEarned: number;
+  /** "till" (rung up by staff) or "online" (ordered ahead by the customer). */
+  source: OrderSource;
+  /** Online orders: "asap" or "HH:MM" today. */
+  pickupTime: string | null;
+  customerPhone: string;
   createdBy: string;
   createdAt: string;
+}
+
+export type OrderSource = "till" | "online";
+
+/** What the customer sees about their online order. */
+export interface PublicOrder {
+  number: number;
+  status: OrderStatus;
+  total: number;
+  pickupTime: string | null;
+  items: { name: string; quantity: number; optionsLabel: string }[];
+  memberPoints: boolean;
 }
 
 export interface OrderLineInput {
@@ -87,7 +115,23 @@ export interface OrderInput {
   customerName?: string;
   notes?: string;
   items: OrderLineInput[];
+  /** Loyalty member to credit (and to pay for a reward). */
+  memberId?: number | null;
+  /** Reward to redeem; needs a member with enough points. */
+  rewardId?: string | null;
 }
+
+/** A customer's order-ahead request from the website. */
+export interface OnlineOrderInput {
+  items: OrderLineInput[];
+  name: string;
+  phone: string;
+  /** "asap" or "HH:MM" later today. */
+  pickupTime: string;
+  notes?: string;
+}
+
+type PricedLine = Omit<OrderLine, "optionsLabel" | "lineTotal"> & { category: string };
 
 export interface PaymentInput {
   method: PaymentMethod;
@@ -108,6 +152,7 @@ export class OrderService {
   private readonly now: () => Date;
   private readonly onChange: (id: number, action: "created" | "updated") => void;
   private readonly onStockChange: (itemId: string) => void;
+  private readonly loyalty: LoyaltyService | null;
 
   constructor(deps: {
     db: DatabaseSync;
@@ -116,12 +161,60 @@ export class OrderService {
     onChange?: (id: number, action: "created" | "updated") => void;
     /** Called when an order changes an item's stock count (so the menu can refresh). */
     onStockChange?: (itemId: string) => void;
+    loyalty?: LoyaltyService;
   }) {
     this.db = deps.db;
     this.config = deps.config;
     this.now = deps.now;
     this.onChange = deps.onChange ?? (() => {});
     this.onStockChange = deps.onStockChange ?? (() => {});
+    this.loyalty = deps.loyalty ?? null;
+  }
+
+  /**
+   * Customer order-ahead from the website: takeaway, paid at pickup.
+   * Checks the shop is open at the pickup time and limits order size and open orders per phone.
+   * A member with the same phone number earns points when the order is paid.
+   */
+  createOnline(input: OnlineOrderInput, clientRef?: string): Order {
+    const settings = this.config.orderAhead;
+    if (!settings) throw new ShopError("ordering_off", "This business doesn't take orders online.");
+    const name = String(input.name ?? "").trim().replace(/\s+/g, " ");
+    if (!name || name.length > 60) throw new ShopError("invalid_name", "Please give a name for the order (up to 60 characters).");
+    const phone = normalizePhone(input.phone ?? "");
+    if (!phone) throw new ShopError("invalid_phone", "Please give a valid phone number (7-15 digits).");
+    const units = (Array.isArray(input.items) ? input.items : []).reduce((n, l) => n + (Number(l?.quantity) || 0), 0);
+    if (units > settings.maxItems) {
+      throw new ShopError("too_many_items", `Online orders can have up to ${settings.maxItems} items. For bigger orders, ask about catering.`);
+    }
+    const pickupTime = this.checkPickupTime(String(input.pickupTime ?? ""));
+
+    const open = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM orders WHERE source = 'online' AND customer_phone = ? AND business_date = ? AND status IN ('new', 'preparing', 'ready')`,
+      )
+      .get(phone, this.today()) as { n: number };
+    if (open.n >= settings.maxOpenPerPhone) {
+      throw new ShopError("too_many", "You already have the maximum number of open orders. Please collect them first or call us.");
+    }
+
+    const member = this.loyalty?.enabled ? this.loyalty.find(phone) : null;
+    return this.create(
+      { type: "takeaway", customerName: name, notes: input.notes, items: input.items, memberId: member?.id ?? null },
+      { by: { name: "Online" }, clientRef, source: "online", pickupTime, customerPhone: phone },
+    );
+  }
+
+  /** Public view of an order for the customer who placed it. */
+  toPublic(order: Order): PublicOrder {
+    return {
+      number: order.number,
+      status: order.status,
+      total: order.total,
+      pickupTime: order.pickupTime,
+      items: order.items.map((l) => ({ name: l.name, quantity: l.quantity, optionsLabel: l.optionsLabel })),
+      memberPoints: order.member !== null,
+    };
   }
 
   /**
@@ -129,7 +222,10 @@ export class OrderService {
    * Prices always come from the server's menu, never from the request.
    * `clientRef` makes retries safe: sending the same ref twice returns the first order.
    */
-  create(input: OrderInput, opts: { by?: Actor; clientRef?: string; payment?: PaymentInput } = {}): Order {
+  create(
+    input: OrderInput,
+    opts: { by?: Actor; clientRef?: string; payment?: PaymentInput; source?: OrderSource; pickupTime?: string; customerPhone?: string } = {},
+  ): Order {
     if (opts.clientRef !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(opts.clientRef)) {
       throw new ShopError("invalid_ref", "clientRef must be 8-64 letters, digits or dashes.");
     }
@@ -148,7 +244,17 @@ export class OrderService {
     if (input.items.length > 50) throw new ShopError("too_many_items", "An order can have up to 50 lines.");
 
     const lines = input.items.map((line) => this.priceLine(line));
-    const total = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+    const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+
+    // Loyalty: an optional member, and an optional reward paid for with their points.
+    const memberId = input.memberId ?? null;
+    if (memberId !== null && (!this.loyalty?.enabled || !this.loyalty.get(memberId))) {
+      throw new ShopError("not_found", "Loyalty member not found");
+    }
+    if (input.rewardId && memberId === null) throw new ShopError("invalid_reward", "Add a loyalty member to use a reward.");
+    const reward = input.rewardId ? this.loyalty!.reward(input.rewardId) : null;
+    const discount = reward ? rewardDiscount(reward, lines).discount : 0;
+    const total = subtotal - discount;
     if (opts.payment) this.checkPayment(opts.payment, total);
 
     let stockTouched: string[] = [];
@@ -165,16 +271,43 @@ export class OrderService {
       const stamp = this.now().toISOString();
       const { lastInsertRowid } = this.db
         .prepare(
-          `INSERT INTO orders (number, business_date, type, table_id, customer_name, notes, status, total, created_at, updated_at, client_ref, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?)`,
+          `INSERT INTO orders (number, business_date, type, table_id, customer_name, notes, status, total, created_at, updated_at, client_ref, created_by,
+             member_id, subtotal, discount, reward_id, reward_name, points_redeemed, source, pickup_time, customer_phone)
+           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(next, businessDate, input.type, tableId, customerName, notes, total, stamp, stamp, opts.clientRef ?? null, opts.by?.name ?? "");
+        .run(
+          next,
+          businessDate,
+          input.type,
+          tableId,
+          customerName,
+          notes,
+          total,
+          stamp,
+          stamp,
+          opts.clientRef ?? null,
+          opts.by?.name ?? "",
+          memberId,
+          subtotal,
+          discount,
+          reward?.id ?? null,
+          reward?.name ?? null,
+          reward?.points ?? 0,
+          opts.source ?? "till",
+          opts.pickupTime ?? null,
+          opts.customerPhone ?? "",
+        );
       const orderId = Number(lastInsertRowid);
       const insertLine = this.db.prepare(
         `INSERT INTO order_items (order_id, item_id, name, unit_price, quantity, note, options) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const l of lines) insertLine.run(orderId, l.itemId, l.name, l.unitPrice, l.quantity, l.note, JSON.stringify(l.options));
-      if (opts.payment) this.recordPayment(orderId, total, opts.payment, opts.by);
+      // Spending points happens in this transaction: not enough points = no order.
+      if (reward) this.loyalty!.change(memberId!, -reward.points, `Redeemed ${reward.name} on order #${next}`, { orderId, by: opts.by?.name });
+      if (opts.payment) {
+        this.recordPayment(orderId, total, opts.payment, opts.by);
+        this.earnPoints(orderId, opts.by);
+      }
       return orderId;
     });
     this.onChange(id, "created");
@@ -189,7 +322,10 @@ export class OrderService {
     if (order.status === "cancelled") throw new ShopError("invalid_status", "This order was cancelled.");
     if (order.payment.status !== "unpaid") throw new ShopError("already_paid", `This order is already ${order.payment.status}.`);
     this.checkPayment(payment, order.total);
-    this.recordPayment(id, order.total, payment, by);
+    transaction(this.db, () => {
+      this.recordPayment(id, order.total, payment, by);
+      this.earnPoints(id, by);
+    });
     this.onChange(id, "updated");
     return this.get(id)!;
   }
@@ -209,6 +345,7 @@ export class OrderService {
              status = 'cancelled', updated_at = ? WHERE id = ?`,
         )
         .run(stamp, by?.name ?? "", why, stamp, id);
+      this.undoLoyalty(order, `refunded`, by);
       return order.status === "cancelled" ? [] : this.returnStock(order.items);
     });
     this.onChange(id, "updated");
@@ -238,7 +375,9 @@ export class OrderService {
     }
     const restored = transaction(this.db, () => {
       this.db.prepare(`UPDATE orders SET status = ?, updated_at = ? WHERE id = ?`).run(status, this.now().toISOString(), id);
-      return status === "cancelled" ? this.returnStock(order.items) : [];
+      if (status !== "cancelled") return [];
+      this.undoLoyalty(order, "cancelled");
+      return this.returnStock(order.items);
     });
     this.onChange(id, "updated");
     for (const itemId of restored) this.onStockChange(itemId);
@@ -275,6 +414,9 @@ export class OrderService {
       card: sum(paid.filter((o) => o.payment.method === "card")),
       unpaidTotal: sum(live.filter((o) => o.payment.status === "unpaid")),
       refunds: sum(orders.filter((o) => o.payment.status === "refunded")),
+      /** Value given away as loyalty rewards on paid orders. */
+      rewards: paid.reduce((n, o) => n + o.discount, 0),
+      online: live.filter((o) => o.source === "online").length,
     };
   }
 
@@ -326,11 +468,84 @@ export class OrderService {
     return this.load(`WHERE client_ref = ?`, [ref])[0] ?? null;
   }
 
+  /** Earns points for a paid order with a member. Call inside the payment transaction. */
+  private earnPoints(orderId: number, by?: Actor): void {
+    if (!this.loyalty?.enabled) return;
+    const row = this.db.prepare(`SELECT member_id, total, number FROM orders WHERE id = ?`).get(orderId) as {
+      member_id: number | null;
+      total: number;
+      number: number;
+    };
+    if (row.member_id === null) return;
+    const points = this.loyalty.pointsFor(row.total);
+    if (points <= 0) return;
+    this.loyalty.change(row.member_id, points, `Earned on order #${row.number}`, { orderId, by: by?.name });
+    this.db.prepare(`UPDATE orders SET points_earned = ? WHERE id = ?`).run(points, orderId);
+  }
+
+  /** On cancel/refund: give back redeemed points and take back earned ones. */
+  private undoLoyalty(order: Order, why: "cancelled" | "refunded", by?: Actor): void {
+    if (!this.loyalty || !order.member) return;
+    if (order.reward) {
+      this.loyalty.change(order.member.id, order.reward.points, `${order.reward.name} returned: order #${order.number} ${why}`, {
+        orderId: order.id,
+        by: by?.name,
+      });
+    }
+    if (order.pointsEarned > 0) {
+      // Clamp at 0: if they already spent the points, we don't go negative.
+      this.loyalty.change(order.member.id, -order.pointsEarned, `Points removed: order #${order.number} ${why}`, {
+        orderId: order.id,
+        by: by?.name,
+        clampAtZero: true,
+      });
+    }
+  }
+
+  /** "asap" or "HH:MM": must be today, while open, and leave time to make the order. */
+  private checkPickupTime(raw: string): string {
+    const { prepMinutes } = this.config.orderAhead!;
+    const now = zonedNow(this.config.timezone, this.now());
+    const hours = this.config.closedDates.includes(now.date) ? undefined : this.config.openingHours[weekdayOf(now.date)];
+    if (!hours) throw new ShopError("closed", "Sorry, we're closed today, so we can't take orders.");
+    const open = toMinutes(hours[0]);
+    const close = toMinutes(hours[1]);
+    const earliest = Math.max(now.minutes + prepMinutes, open);
+    // The kitchen stops 30 minutes before closing (see the café's hours).
+    const latest = close - 30;
+    if (earliest > latest) throw new ShopError("closed", `Sorry, we've stopped taking orders for today. We're open ${hours[0]}-${hours[1]}.`);
+    if (raw === "asap") return "asap";
+    if (!isTime(raw)) throw new ShopError("invalid_time", 'Pickup time must be "asap" or HH:MM.');
+    const t = toMinutes(raw);
+    if (t < earliest || t > latest) {
+      throw new ShopError("invalid_time", `Pick a time between ${fromMinutes(earliest)} and ${fromMinutes(latest)} today.`);
+    }
+    return raw;
+  }
+
+  /** Pickup times a customer can choose today (every 15 minutes). */
+  pickupSlots(): { open: boolean; slots: string[]; reason?: string } {
+    if (!this.config.orderAhead) return { open: false, slots: [], reason: "Online ordering is off." };
+    try {
+      this.checkPickupTime("asap");
+    } catch (err) {
+      return { open: false, slots: [], reason: (err as Error).message };
+    }
+    const now = zonedNow(this.config.timezone, this.now());
+    const hours = this.config.openingHours[weekdayOf(now.date)]!;
+    const earliest = Math.max(now.minutes + this.config.orderAhead.prepMinutes, toMinutes(hours[0]));
+    const slots: string[] = [];
+    for (let t = Math.ceil(earliest / 15) * 15; t <= toMinutes(hours[1]) - 30; t += 15) slots.push(fromMinutes(t));
+    return { open: true, slots };
+  }
+
   /** Validates one line and prices it from the menu + chosen options. */
-  private priceLine(line: OrderLineInput): Omit<OrderLine, "optionsLabel" | "lineTotal"> {
+  private priceLine(line: OrderLineInput): PricedLine {
     const item = this.db
-      .prepare(`SELECT id, name, price, available, options FROM menu_items WHERE id = ? AND active = 1`)
-      .get(String(line?.itemId ?? "")) as { id: string; name: string; price: number; available: number; options: string | null } | undefined;
+      .prepare(`SELECT id, name, category, price, available, options FROM menu_items WHERE id = ? AND active = 1`)
+      .get(String(line?.itemId ?? "")) as
+      | { id: string; name: string; category: string; price: number; available: number; options: string | null }
+      | undefined;
     if (!item) throw new ShopError("invalid_item", `Unknown menu item "${line?.itemId}"`);
     if (!item.available) throw new ShopError("sold_out", `${item.name} is sold out.`);
     if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 50) {
@@ -367,6 +582,7 @@ export class OrderService {
     return {
       itemId: item.id,
       name: item.name,
+      category: item.category,
       unitPrice: item.price + chosen.reduce((n, c) => n + c.price, 0),
       quantity: line.quantity,
       note: String(line.note ?? "").trim().slice(0, 100),
@@ -449,8 +665,31 @@ export class OrderService {
       refunded_at: string | null;
       refunded_by: string | null;
       refund_reason: string | null;
+      member_id: number | null;
+      subtotal: number | null;
+      discount: number;
+      reward_id: string | null;
+      reward_name: string | null;
+      points_redeemed: number;
+      points_earned: number;
+      source: OrderSource;
+      pickup_time: string | null;
+      customer_phone: string;
     }[];
     if (!rows.length) return [];
+
+    const memberIds = [...new Set(rows.map((r) => r.member_id).filter((m): m is number => m !== null))];
+    const members = new Map(
+      memberIds.length
+        ? (
+            this.db.prepare(`SELECT id, name, phone FROM loyalty_members WHERE id IN (${memberIds.map(() => "?").join(",")})`).all(...memberIds) as {
+              id: number;
+              name: string;
+              phone: string;
+            }[]
+          ).map((m) => [m.id, { id: m.id, name: m.name || `Member …${m.phone.slice(-4)}` }])
+        : [],
+    );
 
     const lineRows = this.db
       .prepare(`SELECT * FROM order_items WHERE order_id IN (${rows.map(() => "?").join(",")}) ORDER BY id`)
@@ -473,7 +712,15 @@ export class OrderService {
       customerName: r.customer_name,
       notes: r.notes,
       status: r.status,
+      subtotal: r.subtotal ?? r.total,
+      discount: r.discount,
       total: r.total,
+      member: r.member_id !== null ? (members.get(r.member_id) ?? null) : null,
+      reward: r.reward_id ? { id: r.reward_id, name: r.reward_name ?? r.reward_id, points: r.points_redeemed } : null,
+      pointsEarned: r.points_earned,
+      source: r.source,
+      pickupTime: r.pickup_time,
+      customerPhone: r.customer_phone,
       createdBy: r.created_by,
       createdAt: r.created_at,
       payment: {

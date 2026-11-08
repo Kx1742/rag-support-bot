@@ -33,12 +33,19 @@ async function init() {
   $("mode-badge").hidden = config.mode !== "offline";
   if (tenant.brandColor) document.documentElement.style.setProperty("--brand", tenant.brandColor);
   tenantInfo = tenant;
-  if (tenant.booking) {
-    $("book-btn").hidden = false;
-    $("book-btn").addEventListener("click", openBookingCard);
-    $("manage-btn").hidden = false;
-    $("manage-btn").addEventListener("click", openManageCard);
+  // Quick actions: only the ones this business offers.
+  const actions = [
+    ["order-btn", tenant.orderAhead, openOrderCard],
+    ["book-btn", tenant.booking, openBookingCard],
+    ["manage-btn", tenant.booking, openManageCard],
+    ["points-btn", tenant.loyalty, openPointsCard],
+  ];
+  for (const [id, enabled, open] of actions) {
+    $(id).hidden = !enabled;
+    if (enabled) $(id).addEventListener("click", open);
   }
+  $("quick-actions").hidden = !actions.some(([, enabled]) => enabled);
+  if (tenant.loyalty) $("points-btn").lastChild.textContent = ` My ${tenant.loyalty.name}`;
 
   for (const question of tenant.suggestedQuestions) {
     const button = document.createElement("button");
@@ -505,6 +512,310 @@ function openManageCard() {
 
   addCard(form);
   reference.focus();
+}
+
+// ---------- Order ahead ----------
+
+/** Order-ahead card: pick items (with options), a pickup time, name and phone. Pay at pickup. */
+async function openOrderCard() {
+  let data;
+  try {
+    data = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}/menu`);
+  } catch (err) {
+    addCard(el("div", { class: "booking-card" }, el("strong", {}, "Order ahead"), el("div", { class: "hint" }, err.message)));
+    return;
+  }
+  if (!data.ordering.open) {
+    addCard(el("div", { class: "booking-card" }, el("strong", {}, "Order ahead"), el("div", { class: "hint" }, data.ordering.reason)));
+    return;
+  }
+
+  const money = (cents) => `$${(cents / 100).toFixed(2)}`;
+  const groups = new Map(data.optionGroups.map((g) => [g.id, g]));
+  const categories = [...new Set(data.menu.map((m) => m.category))];
+  const cart = []; // { key, item, options, qty, label, unit }
+  let category = categories[0];
+  let picking = null; // item whose options are open
+
+  const priceOf = (item, options) =>
+    item.price +
+    item.options.reduce((sum, gid) => {
+      const g = groups.get(gid);
+      const ids = g.type === "single" ? [options[gid] ?? g.choices.find((c) => c.default).id] : (options[gid] ?? []);
+      return sum + ids.reduce((n, id) => n + (g.choices.find((c) => c.id === id)?.price ?? 0), 0);
+    }, 0);
+  const labelOf = (item, options) =>
+    item.options
+      .flatMap((gid) => {
+        const g = groups.get(gid);
+        const ids = g.type === "single" ? [options[gid]].filter(Boolean) : (options[gid] ?? []);
+        return ids.map((id) => g.choices.find((c) => c.id === id)).filter((c) => c && !c.default).map((c) => c.name);
+      })
+      .join(" · ");
+
+  const tabs = el("div", { class: "order-tabs" });
+  const list = el("div", { class: "order-items-list" });
+  const cartBox = el("div", { class: "order-cart" });
+  const pickup = el(
+    "select",
+    { "aria-label": "Pickup time" },
+    el("option", { value: "asap" }, "As soon as possible"),
+    ...data.ordering.slots.map((t) => el("option", { value: t }, t)),
+  );
+  const name = el("input", { maxlength: "60", autocomplete: "name", required: true });
+  const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
+  const notes = el("input", { maxlength: "300", placeholder: "Optional" });
+  const error = el("p", { class: "form-error", role: "alert" });
+  const submit = el("button", { type: "submit", class: "primary", disabled: true }, "Place order");
+  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  const clientRef = crypto.randomUUID();
+
+  const form = el(
+    "form",
+    { class: "booking-card form order-card" },
+    el("strong", {}, "Order ahead"),
+    el("div", { class: "hint" }, "Pick up at the counter and pay there by cash or card."),
+    tabs,
+    list,
+    cartBox,
+    el("div", { class: "row" }, el("label", {}, "Pickup", pickup), el("label", {}, "Name", name)),
+    el("div", { class: "row" }, el("label", {}, "Phone", phone), el("label", {}, "Notes", notes)),
+    error,
+    el("div", { class: "actions" }, close, submit),
+  );
+
+  function renderTabs() {
+    tabs.replaceChildren(
+      ...categories.map((c) =>
+        el(
+          "button",
+          {
+            type: "button",
+            "aria-pressed": String(c === category),
+            onclick: () => {
+              category = c;
+              picking = null;
+              renderTabs();
+              renderList();
+            },
+          },
+          c,
+        ),
+      ),
+    );
+  }
+
+  function renderList() {
+    list.replaceChildren(
+      ...data.menu
+        .filter((m) => m.category === category)
+        .flatMap((item) => {
+          const row = el(
+            "div",
+            { class: "order-row" },
+            el("div", {}, el("div", { class: "order-name" }, item.name), el("div", { class: "hint" }, item.options.length ? `from ${money(item.price)}` : money(item.price), item.lowStock ? ` · only ${item.lowStock} left` : "")),
+            el(
+              "button",
+              {
+                type: "button",
+                class: "add-btn",
+                "aria-label": `Add ${item.name}`,
+                onclick: () => {
+                  if (item.options.length) {
+                    picking = picking?.id === item.id ? null : { id: item.id, options: {} };
+                    renderList();
+                  } else addToCart(item, {});
+                },
+              },
+              "+",
+            ),
+          );
+          return picking?.id === item.id ? [row, optionPicker(item)] : [row];
+        }),
+    );
+  }
+
+  function optionPicker(item) {
+    const opts = picking.options;
+    const box = el("div", { class: "opt-picker" });
+    const draw = () => {
+      box.replaceChildren(
+        ...item.options.map((gid) => {
+          const g = groups.get(gid);
+          return el(
+            "div",
+            { class: "opt-row" },
+            el("span", { class: "hint" }, g.name),
+            ...g.choices.map((c) => {
+              const on = g.type === "single" ? (opts[gid] ?? g.choices.find((x) => x.default).id) === c.id : (opts[gid] ?? []).includes(c.id);
+              return el(
+                "button",
+                {
+                  type: "button",
+                  "aria-pressed": String(on),
+                  onclick: () => {
+                    if (g.type === "single") opts[gid] = c.default ? undefined : c.id;
+                    else opts[gid] = on ? opts[gid].filter((x) => x !== c.id) : [...(opts[gid] ?? []), c.id];
+                    if (g.type === "multi" && !opts[gid].length) delete opts[gid];
+                    if (opts[gid] === undefined) delete opts[gid];
+                    draw();
+                  },
+                },
+                c.price ? `${c.name} +${money(c.price)}` : c.name,
+              );
+            }),
+          );
+        }),
+        el("button", { type: "button", class: "primary", onclick: () => addToCart(item, { ...opts }) }, `Add · ${money(priceOf(item, opts))}`),
+      );
+    };
+    draw();
+    return box;
+  }
+
+  function addToCart(item, options) {
+    const key = JSON.stringify([item.id, Object.entries(options).sort()]);
+    const line = cart.find((l) => l.key === key);
+    if (line) line.qty = Math.min(line.qty + 1, 20);
+    else cart.push({ key, item, options, qty: 1, label: labelOf(item, options), unit: priceOf(item, options) });
+    picking = null;
+    renderList();
+    renderCart();
+  }
+
+  function renderCart() {
+    const total = cart.reduce((n, l) => n + l.unit * l.qty, 0);
+    cartBox.replaceChildren(
+      ...(cart.length
+        ? cart.map((l) =>
+            el(
+              "div",
+              { class: "cart-line" },
+              el("div", {}, el("div", {}, `${l.qty}× ${l.item.name}`), l.label ? el("div", { class: "hint" }, l.label) : null),
+              el("span", {}, money(l.unit * l.qty)),
+              el(
+                "button",
+                {
+                  type: "button",
+                  class: "ghost small-btn",
+                  "aria-label": `Remove one ${l.item.name}`,
+                  onclick: () => {
+                    l.qty -= 1;
+                    if (!l.qty) cart.splice(cart.indexOf(l), 1);
+                    renderCart();
+                  },
+                },
+                "−",
+              ),
+            ),
+          )
+        : [el("div", { class: "hint" }, "Your order is empty. Tap + to add items.")]),
+    );
+    submit.disabled = cart.length === 0;
+    submit.textContent = cart.length ? `Place order · ${money(total)}` : "Place order";
+  }
+
+  close.addEventListener("click", () => form.remove());
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    submit.disabled = true;
+    try {
+      const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientRef,
+          name: name.value,
+          phone: phone.value,
+          pickupTime: pickup.value,
+          notes: notes.value,
+          items: cart.map((l) => ({ itemId: l.item.id, quantity: l.qty, options: l.options })),
+        }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || `Order failed (${res.status})`);
+      form.remove();
+      const o = out.order;
+      addCard(
+        el(
+          "div",
+          { class: "booking-card confirmed" },
+          el("strong", {}, "✓ Order placed"),
+          el("div", { class: "ref" }, `#${String(o.number).padStart(3, "0")}`),
+          el("div", {}, `Pickup ${o.pickupTime === "asap" ? "as soon as possible" : `at ${o.pickupTime}`} · ${money(o.total)} to pay at the counter`),
+          ...o.items.map((i) => el("div", { class: "hint" }, `${i.quantity}× ${i.name}${i.optionsLabel ? ` · ${i.optionsLabel}` : ""}`)),
+          el(
+            "div",
+            { class: "hint" },
+            o.memberPoints
+              ? `Watch the pickup screen for #${String(o.number).padStart(3, "0")}. You'll earn ${tenantInfo.loyalty?.name ?? "points"} when you pay.`
+              : `Watch the pickup screen for #${String(o.number).padStart(3, "0")}.`,
+          ),
+        ),
+      );
+    } catch (err) {
+      error.textContent = err.message;
+      submit.disabled = cart.length === 0;
+    }
+  });
+
+  renderTabs();
+  renderList();
+  renderCart();
+  addCard(form);
+}
+
+// ---------- Loyalty balance ----------
+
+function openPointsCard() {
+  const program = tenantInfo.loyalty?.name ?? "Points";
+  const phone = el("input", { type: "tel", autocomplete: "tel", required: true, placeholder: "The number you joined with" });
+  const error = el("p", { class: "form-error", role: "alert" });
+  const result = el("div");
+  const find = el("button", { type: "submit", class: "primary" }, "Check");
+  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  const form = el(
+    "form",
+    { class: "booking-card form" },
+    el("strong", {}, `My ${program}`),
+    el("label", {}, "Phone", phone),
+    error,
+    result,
+    el("div", { class: "actions" }, close, find),
+  );
+  close.addEventListener("click", () => form.remove());
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    find.disabled = true;
+    try {
+      const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/loyalty`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phone.value }),
+      });
+      const s = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(s.error || `Request failed (${res.status})`);
+      result.replaceChildren(
+        el(
+          "div",
+          { class: "booking-summary" },
+          el("div", { class: "ref" }, `${s.points} points`),
+          s.nextReward ? el("div", {}, `${s.nextReward.pointsNeeded} more for ${s.nextReward.name}`) : el("div", {}, "You can use any reward!"),
+          ...s.rewards.map((r) => el("div", { class: r.affordable ? "status" : "hint" }, `${r.affordable ? "✓" : "·"} ${r.name} (${r.points} pts)`)),
+          el("div", { class: "hint" }, "Show your phone number at the counter to use a reward."),
+        ),
+      );
+    } catch (err) {
+      result.replaceChildren();
+      error.textContent = err.message;
+    } finally {
+      find.disabled = false;
+    }
+  });
+  addCard(form);
+  phone.focus();
 }
 
 function shiftDate(date, days) {

@@ -113,11 +113,26 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
       const visible = can(user.role, "sales.view") ? summary : { orders: summary.orders, items: summary.items, open: summary.open, unpaid: summary.unpaid };
       return ok(res, { orders: shop.orders.list(date), summary: visible });
     }
+    // ----- loyalty -----
+    case "GET /loyalty": {
+      need("loyalty.use");
+      const member = shop.loyalty.find(url.searchParams.get("phone") ?? "");
+      if (!member) throw new HttpError(404, "No member with that phone number.");
+      return ok(res, { member, summary: shop.loyalty.summary(member), history: shop.loyalty.history(member.id, 10) });
+    }
+    case "POST /loyalty": {
+      need("loyalty.use");
+      const b = await readObject(req);
+      const member = shop.loyalty.join(String(b.phone ?? ""), String(b.name ?? ""));
+      return ok(res, { member, summary: shop.loyalty.summary(member), history: [] }, 201);
+    }
+
     case "POST /orders": {
       need("till.use");
       const body = await readObject(req);
       const payment = body.payment ? parsePayment(body.payment) : undefined;
       if (payment) need("payments.take");
+      if (body.memberId !== undefined && body.memberId !== null) need("loyalty.use");
       const order = shop.orders.create(parseOrder(body), {
         by: actor,
         clientRef: body.clientRef === undefined ? undefined : String(body.clientRef),
@@ -271,6 +286,9 @@ function deskInfo(shop: Shop, user: CurrentUser & { tenantId?: string }) {
     currency: shop.config.currency,
     today: shop.bookings.today().date,
     tables: shop.config.tables,
+    loyalty: shop.config.loyalty
+      ? { name: shop.config.loyalty.name, pointsPerDollar: shop.config.loyalty.pointsPerDollar, rewards: shop.config.loyalty.rewards }
+      : null,
     bookingStatuses: BOOKING_STATUSES,
     orderStatuses: ORDER_STATUSES,
   };
@@ -290,6 +308,8 @@ function parseOrder(body: Record<string, unknown>): OrderInput {
           options: i?.options && typeof i.options === "object" && !Array.isArray(i.options) ? (i.options as Record<string, string | string[]>) : {},
         }))
       : [],
+    memberId: body.memberId === undefined || body.memberId === null ? null : Number(body.memberId),
+    rewardId: body.rewardId ? String(body.rewardId) : null,
   };
 }
 
@@ -324,7 +344,7 @@ function liveEvents(req: IncomingMessage, res: ServerResponse, shop: Shop, heart
       ...(booking && {
         booking: { name: booking.name, date: booking.date, time: booking.time, partySize: booking.partySize, source: booking.source },
       }),
-      ...(order && { order: { number: order.number, type: order.type, tableId: order.tableId, by: order.createdBy } }),
+      ...(order && { order: { number: order.number, type: order.type, tableId: order.tableId, by: order.createdBy, source: order.source } }),
     });
   };
   const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), heartbeatMs);

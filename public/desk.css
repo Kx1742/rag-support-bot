@@ -2416,3 +2416,179 @@ a.btn {
   text-decoration: none;
   color: var(--text);
 }
+
+/* ===================== Loyalty & online orders ===================== */
+
+.member-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #f0c66b;
+  border-radius: var(--radius-sm);
+  background: #fff7e3;
+  color: #4a3500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .member-card {
+    background: #3a2f12;
+    border-color: #7a5f1d;
+    color: #f5e19a;
+  }
+}
+
+.member-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-top strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-btn {
+  min-height: 32px;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.member-reward {
+  font-weight: 700;
+}
+
+.member-reward.warn {
+  color: var(--late);
+}
+
+.member-earn {
+  font-size: 13px;
+}
+
+.lookup-row {
+  display: flex;
+  gap: 8px;
+}
+
+.join-box,
+.member-found {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.member-found {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.member-found p {
+  grid-column: 1 / -1;
+}
+
+.member-points {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: #f0c66b;
+  color: #4a3500;
+  line-height: 1;
+}
+
+.member-points strong {
+  font-size: 24px;
+}
+
+.member-points span {
+  font-size: 12px;
+}
+
+.reward-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.reward-opt {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+}
+
+.reward-opt:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+
+.reward-opt small {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.member-history {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.member-history summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.member-history ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.member-history b {
+  display: inline-block;
+  min-width: 42px;
+  font-variant-numeric: tabular-nums;
+}
+
+.online-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.online-line a {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.chip.online {
+  background: #6a54b3;
+  color: #fff;
+}
+
+.chip.member {
+  background: #fff1c2;
+  color: #6b4d00;
+}
+
+.chip.reward {
+  background: var(--ready-bg);
+  color: var(--ready);
+}

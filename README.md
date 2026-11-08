@@ -25,7 +25,10 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
 - Grounded answers with clickable citations, streamed over Server-Sent Events
 - **Books and cancels tables in conversation** (Gemini function calling), always confirming first
 - "Book a table" form in the chat, which also works without AI
+- **Order ahead**: pick items and drink options, choose a pickup time, pay at the counter; the order
+  appears on the kitchen screen and the pickup screen
 - **My booking**: look up or cancel your own booking with its reference + phone number
+- **My points**: check a loyalty balance and rewards by phone number
 - **Knows what's sold out**: with Gemini it reads the live menu (prices, sold out, "only 3 left");
   offline it adds a "Heads up: … is sold out today" notice
 
@@ -46,6 +49,10 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
   stock comes back on cancel/refund); managers **add items, change prices and options, hide items**.
   Desk edits survive changes to `shop.json`
 - **Live updates**: new bookings (on any date) and orders appear on every open desk screen instantly
+- **Loyalty ("Byte Points")**: look up or join members by phone at the till, earn 1 point per $1 paid,
+  redeem rewards (free pastry 50, free drink 100, breakfast combo 250); the reward makes the most
+  expensive matching item free; points come back on cancel/refund and expire after 12 months idle
+- **Online orders** show on the kitchen screen with an Online label, pickup time and tap-to-call phone
 - **Refunds** (managers): with a reason; paid orders can't simply be cancelled
 - **End-of-day report** (managers): sales, cash vs card, unpaid, refunds, best sellers, sales by hour, CSV export
 - **Staff accounts** (managers): add people, change roles, reset PINs, deactivate
@@ -57,7 +64,7 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
 - Prices and option surcharges always come from the server, never from the browser
 - Duplicate-order protection: each till order carries an idempotency key, so a network retry can't charge twice
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
-- 112 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 130 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
@@ -108,11 +115,11 @@ them. Unexpected errors are not.
 
 | | Customer | Staff | Manager |
 |---|:-:|:-:|:-:|
-| Chat, book a table, look up / cancel own booking (public site) | ✓ | ✓ | ✓ |
+| Chat, book a table, order ahead, look up own booking or points (public site) | ✓ | ✓ | ✓ |
 | Ring up orders, take payments, move orders along | – | ✓ | ✓ |
 | Create, seat and cancel bookings; mark items sold out; set stock counts | – | ✓ | ✓ |
 | Add menu items, change prices and options, hide items | – | – | ✓ |
-| Cancel **unpaid** orders | – | ✓ | ✓ |
+| Cancel **unpaid** orders; look up / add loyalty members and redeem rewards | – | ✓ | ✓ |
 | Refund paid orders | – | – | ✓ |
 | See sales totals and the end-of-day report | – | – | ✓ |
 | Add staff, change roles, reset PINs | – | – | ✓ |
@@ -143,6 +150,8 @@ them. Unexpected errors are not.
 | Stock checked and counted down inside the same transaction as the order | Two tills can't both sell the last croissant. |
 | shop.json seeds the menu; the database is the source of truth after that | Managers edit in the desk without touching files, and file updates don't undo their edits. |
 | Pickup screen gets numbers only | It's public, so it can't leak names or orders. |
+| Points spent and earned inside the order's transaction, with a ledger row for every change | A failed order never costs points, and every balance can be explained. |
+| Public points lookup returns points and rewards only | Knowing a phone number doesn't reveal a name or history. |
 | Server-Sent Events for the desk | Simple one-way live updates over plain HTTP. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
@@ -168,7 +177,7 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 112 tests
+npm test                      # 130 tests
 npm run typecheck
 ```
 
@@ -192,12 +201,16 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 | `POST` | `/api/tenants/:id/chat` | Chat. Body `{ message, history }`; responds with an SSE stream (`sources`, `action`, `delta`, `done`) |
 | `GET` | `/api/tenants/:id/availability?date=&partySize=` | Free booking times |
 | `GET` | `/api/tenants/:id/pickup`, `.../pickup/events` | Pickup screen numbers and live updates (public) |
+| `GET` | `/api/tenants/:id/menu` | Public menu and today's pickup times |
+| `POST` | `/api/tenants/:id/orders` | Order ahead: `{ name, phone, pickupTime, items, clientRef? }` |
+| `POST` | `/api/tenants/:id/loyalty` | Points balance: `{ phone }` |
 | `POST` | `/api/tenants/:id/bookings` | Book a table: `{ date, time, partySize, name, phone, notes? }` |
 | `POST` | `/api/tenants/:id/bookings/lookup`, `.../cancel` | Customer: `{ reference, phone }` |
 | `POST` | `/api/desk/login`, `/api/desk/logout` | Desk session (cookie): `{ tenantId, username, pin }` |
 | `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue; POST takes `items[].options`, `clientRef`, optional `payment` |
 | `POST` | `/api/desk/orders/:id/pay`, `/api/desk/orders/:id/refund` | Take payment `{ method, tendered? }`; refund `{ reason }` (manager) |
 | `GET` | `/api/desk/report?date=` | End-of-day report (manager) |
+| `GET`, `POST` | `/api/desk/loyalty?phone=`, `/api/desk/loyalty` | Look up or join a member; orders take `memberId` and `rewardId` |
 | `GET`, `POST`, `PATCH` | `/api/desk/staff`, `/api/desk/staff/:id` | Staff accounts (manager) |
 | `GET`, `POST`, `PATCH` | `/api/desk/bookings`, `/api/desk/bookings/:id` | Bookings by day, status changes |
 | `GET`, `POST`, `PATCH` | `/api/desk/menu`, `/api/desk/menu/:id` | Menu; PATCH `{ available }` or `{ stock }` (staff), item fields or `{ hidden }` (manager) |
@@ -214,10 +227,9 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 - [ ] Integrated card payments (Stripe Terminal, test mode first)
 - [x] Stock counts, menu & price editing in the desk
 - [x] Chatbot reads the live menu; customer pickup screen
-- [ ] Loyalty points (the café's docs describe them; the till doesn't support them yet)
+- [x] Loyalty points and order ahead
 - [ ] Deploy a live demo
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
-- [ ] Customers order ahead through the chat
 
 ## Privacy note
 

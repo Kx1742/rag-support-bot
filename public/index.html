@@ -19,10 +19,15 @@
             <span class="badge badge-warn" id="mode-badge" hidden>Offline mode</span>
           </p>
         </div>
-        <button class="ghost accent" id="book-btn" type="button" hidden>Book a table</button>
-        <button class="ghost" id="manage-btn" type="button" hidden>My booking</button>
         <button class="ghost" id="new-chat" type="button" title="Start a new conversation">New chat</button>
       </header>
+
+      <nav class="quick-actions" id="quick-actions" aria-label="Quick actions" hidden>
+        <button type="button" id="order-btn" hidden><span aria-hidden="true">🥤</span> Order ahead</button>
+        <button type="button" id="book-btn" hidden><span aria-hidden="true">📅</span> Book a table</button>
+        <button type="button" id="manage-btn" hidden><span aria-hidden="true">🔎</span> My booking</button>
+        <button type="button" id="points-btn" hidden><span aria-hidden="true">★</span> My points</button>
+      </nav>
 
       <main class="messages" id="messages" aria-live="polite">
         <section class="welcome" id="welcome">

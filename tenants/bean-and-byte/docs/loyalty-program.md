@@ -17,3 +17,7 @@ You earn 1 Byte Point for every $1 you spend.
 ## Rules
 Points cannot be earned on gift card purchases. Points cannot be transferred between
 accounts or exchanged for cash.
+
+## Checking Your Points
+Tap "My points" in this chat and enter the phone number you joined with to see your balance.
+Show your phone number at the counter to earn points or use a reward.

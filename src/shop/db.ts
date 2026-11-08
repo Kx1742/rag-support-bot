@@ -96,6 +96,41 @@ const MIGRATIONS = [
   ALTER TABLE menu_items ADD COLUMN edited INTEGER NOT NULL DEFAULT 0;   -- 1 = changed in the desk, shop.json no longer overrides it
   ALTER TABLE menu_items ADD COLUMN origin TEXT NOT NULL DEFAULT 'file'; -- 'file' (shop.json) or 'desk'
   `,
+  // 4: loyalty program + order ahead
+  `
+  CREATE TABLE loyalty_members (
+    id            INTEGER PRIMARY KEY,
+    phone         TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL DEFAULT '',
+    points        INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
+    lifetime      INTEGER NOT NULL DEFAULT 0,
+    last_activity TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+  );
+
+  -- Every change to a balance, so points can always be explained.
+  CREATE TABLE loyalty_ledger (
+    id         INTEGER PRIMARY KEY,
+    member_id  INTEGER NOT NULL REFERENCES loyalty_members (id),
+    order_id   INTEGER REFERENCES orders (id),
+    delta      INTEGER NOT NULL,
+    reason     TEXT NOT NULL,
+    by_name    TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX loyalty_ledger_by_member ON loyalty_ledger (member_id, id);
+
+  ALTER TABLE orders ADD COLUMN member_id INTEGER REFERENCES loyalty_members (id);
+  ALTER TABLE orders ADD COLUMN subtotal INTEGER;
+  ALTER TABLE orders ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN reward_id TEXT;
+  ALTER TABLE orders ADD COLUMN reward_name TEXT;
+  ALTER TABLE orders ADD COLUMN points_redeemed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN points_earned INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE orders ADD COLUMN source TEXT NOT NULL DEFAULT 'till';
+  ALTER TABLE orders ADD COLUMN pickup_time TEXT;
+  ALTER TABLE orders ADD COLUMN customer_phone TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */
