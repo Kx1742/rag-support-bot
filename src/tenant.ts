@@ -5,7 +5,13 @@ import type { SourceDocument, TenantConfig } from "./types.ts";
 const SUPPORTED_EXTENSIONS = [".md", ".txt"];
 
 export const TENANTS_DIR = resolve(import.meta.dirname, "..", "tenants");
-export const DATA_DIR = resolve(import.meta.dirname, "..", "data");
+/**
+ * Where indexes and shop databases live. Set DATA_DIR to put them on a persistent disk
+ * (e.g. /var/data on Render). Read lazily so a value from .env is picked up.
+ */
+export function dataDir(): string {
+  return process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : resolve(import.meta.dirname, "..", "data");
+}
 
 /** Tenant ids become folder names, so only allow safe characters. */
 export function assertValidTenantId(id: string): void {
@@ -14,9 +20,9 @@ export function assertValidTenantId(id: string): void {
   }
 }
 
-export function indexPath(tenantId: string, dataDir = DATA_DIR): string {
+export function indexPath(tenantId: string, dir = dataDir()): string {
   assertValidTenantId(tenantId);
-  return join(dataDir, tenantId, "index.json");
+  return join(dir, tenantId, "index.json");
 }
 
 export async function loadTenant(

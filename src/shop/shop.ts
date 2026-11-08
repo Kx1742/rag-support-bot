@@ -1,10 +1,11 @@
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { DATA_DIR } from "../tenant.ts";
+import { dataDir } from "../tenant.ts";
 import { BookingService } from "./bookings.ts";
 import { loadShopConfig, type ShopConfig } from "./config.ts";
-import { openDatabase } from "./db.ts";
+import { openDatabase, transaction } from "./db.ts";
 import { LoyaltyService } from "./loyalty.ts";
 import { MenuService } from "./menu.ts";
 import { OrderService } from "./orders.ts";
@@ -26,12 +27,14 @@ export class Shop {
   readonly loyalty: LoyaltyService;
   readonly events = new EventEmitter();
   private readonly db: DatabaseSync;
+  private readonly clock?: () => Date;
 
   constructor(deps: { tenantId: string; config: ShopConfig; db: DatabaseSync; now?: () => Date }) {
     this.tenantId = deps.tenantId;
     this.config = deps.config;
     this.db = deps.db;
     const now = deps.now ?? (() => new Date());
+    this.clock = now;
     const emit =
       (kind: ShopChange["kind"]) =>
       (id: string | number, action: ShopChange["action"] = "updated") =>
@@ -53,8 +56,51 @@ export class Shop {
     this.menu.sync(this.config.menu);
   }
 
+  /**
+   * Deletes all orders, bookings, members and staff accounts, and resets the menu to
+   * shop.json. Used by the public demo's nightly reset. Desks are told to refresh.
+   */
+  resetData(): void {
+    transaction(this.db, () => {
+      this.db.exec(`
+        DELETE FROM loyalty_ledger;
+        DELETE FROM order_items;
+        DELETE FROM orders;
+        DELETE FROM loyalty_members;
+        DELETE FROM bookings;
+        DELETE FROM staff;
+        DELETE FROM menu_items WHERE origin = 'desk';
+        UPDATE menu_items SET edited = 0, stock = NULL, available = 1;
+      `);
+    });
+    this.menu.sync(this.config.menu);
+    for (const kind of ["booking", "order", "menu"] as const) this.events.emit("change", { kind, id: 0, action: "updated" } satisfies ShopChange);
+  }
+
+  /**
+   * Writes a consistent copy of the database (safe while the shop is running) and keeps
+   * only the newest `keep` copies. Returns the new file's path.
+   */
+  backup(dir: string, keep = 7): string {
+    mkdirSync(dir, { recursive: true });
+    const stamp = this.nowIso().replace(/[-:]/g, "").replace("T", "-").slice(0, 15); // 20261113-150000
+    const file = join(dir, `shop-${stamp}.db`);
+    if (existsSync(file)) return file;
+    this.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+    const old = readdirSync(dir)
+      .filter((f) => /^shop-\d{8}-\d{6}\.db$/.test(f))
+      .sort()
+      .slice(0, -keep);
+    for (const f of old) rmSync(join(dir, f));
+    return file;
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  private nowIso(): string {
+    return (this.clock ?? (() => new Date()))().toISOString();
   }
 }
 
@@ -62,6 +108,6 @@ export class Shop {
 export async function openShop(tenantId: string, opts: { dataDir?: string; dbPath?: string; now?: () => Date } = {}): Promise<Shop | null> {
   const config = await loadShopConfig(tenantId);
   if (!config) return null;
-  const db = openDatabase(opts.dbPath ?? join(opts.dataDir ?? DATA_DIR, tenantId, "shop.db"));
+  const db = openDatabase(opts.dbPath ?? join(opts.dataDir ?? dataDir(), tenantId, "shop.db"));
   return new Shop({ tenantId, config, db, now: opts.now });
 }

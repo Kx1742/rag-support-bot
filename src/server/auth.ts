@@ -74,6 +74,11 @@ export class StaffAuth {
     }
   }
 
+  /** Ends every session for a business (used when the demo resets). */
+  endAll(tenantId: string): void {
+    for (const [token, s] of this.sessions) if (s.tenantId === tenantId) this.sessions.delete(token);
+  }
+
   private pruneExpired(): void {
     const now = this.now();
     for (const [token, s] of this.sessions) if (s.expiresAt <= now) this.sessions.delete(token);

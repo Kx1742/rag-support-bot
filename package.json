@@ -13,7 +13,9 @@
     "ingest": "node src/cli/ingest.ts",
     "chat": "node src/cli/chat.ts",
     "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backup": "node src/cli/backup.ts",
+    "start:demo": "node src/server/main.ts --demo"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

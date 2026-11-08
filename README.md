@@ -17,6 +17,9 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
 
 > The demo business, **Bean & Byte Café**, is fictional. Its documents and menu are made up for this project.
 
+**Live demo:** _coming soon_ <!-- TODO: paste the Render URL here after deploying -->
+In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager**. The data resets every night.
+
 <!-- TODO: add screenshots or a GIF of the chat and the desk here -->
 
 ## Features
@@ -64,7 +67,7 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
 - Prices and option surcharges always come from the server, never from the browser
 - Duplicate-order protection: each till order carries an idempotency key, so a network retry can't charge twice
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
-- 130 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 135 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
@@ -153,6 +156,8 @@ them. Unexpected errors are not.
 | Points spent and earned inside the order's transaction, with a ledger row for every change | A failed order never costs points, and every balance can be explained. |
 | Public points lookup returns points and rewards only | Knowing a phone number doesn't reveal a name or history. |
 | Server-Sent Events for the desk | Simple one-way live updates over plain HTTP. |
+| Demo data created through the normal services | The demo follows the same rules as real use, and seeding tests those rules too. |
+| `VACUUM INTO` for backups | A consistent snapshot while the app keeps running, with no extra tools. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
 ## Getting started
@@ -177,9 +182,49 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 130 tests
+npm test                      # 135 tests
 npm run typecheck
 ```
+
+### Public demo mode
+
+```bash
+npm run start:demo        # or set DEMO_MODE=1
+```
+
+- Seeds a believable shift: orders in every kitchen stage, bookings, a loyalty member with points, stock counts
+- The desk login shows one-tap **demo-barista / 2580** and **demo-manager / 1357** logins
+- Data resets every night at `DEMO_RESET_HOUR` (default 04:00, shop time)
+- The shared demo accounts can't be changed or deactivated, so one visitor can't lock out the rest
+  (visitors can still try staff management on accounts they add themselves)
+
+## Deploy
+
+**Render (one click, free):** the repo includes a [`render.yaml`](render.yaml) blueprint.
+
+1. Push the repo to GitHub (done).
+2. In the [Render dashboard](https://dashboard.render.com): **New → Blueprint**, pick this repository, **Apply**.
+3. Optional: in the service's **Environment** tab, add `GEMINI_API_KEY` for AI answers and chat bookings.
+4. Paste the `https://….onrender.com` URL into this README.
+
+The blueprint runs the public demo on the free plan with HTTPS, secure cookies and a daily AI-message cap.
+The free plan sleeps when idle (the first visit takes a few seconds) and has no disk, which is fine
+for the demo because it reseeds on start. For a real business, use a paid plan, remove `DEMO_MODE`
+and add the disk shown in the file.
+
+**Any Docker host:**
+
+```bash
+docker build -t support-bot .
+docker run -p 3000:3000 -v support-data:/data -e STAFF_PASSWORD=change-me-please support-bot
+```
+
+**Production settings:** `DATA_DIR` (put it on a persistent disk), `TRUST_PROXY=1` behind a proxy,
+`COOKIE_SECURE=1` with HTTPS, `DAILY_MESSAGE_LIMIT` to protect the AI quota.
+
+**Backups:** a consistent copy of each shop database is saved every `BACKUP_EVERY_HOURS` (default 24)
+to `<DATA_DIR>/<business>/backups`, keeping the newest 7. Run one any time with `npm run backup`;
+it's safe while the server is running.
 
 ### Add your own business
 
@@ -228,7 +273,8 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 - [x] Stock counts, menu & price editing in the desk
 - [x] Chatbot reads the live menu; customer pickup screen
 - [x] Loyalty points and order ahead
-- [ ] Deploy a live demo
+- [x] Deploy-ready: public demo mode, Dockerfile, Render blueprint, backups
+- [ ] Put the live demo URL and screenshots in this README
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 
 ## Privacy note

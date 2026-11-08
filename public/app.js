@@ -22,6 +22,17 @@ init().catch((err) => showError(`Could not load the chat: ${err.message}`));
 async function init() {
   const config = await getJson("/api/config");
   tenantId = new URLSearchParams(location.search).get("tenant") || config.defaultTenant;
+  if (config.demo) {
+    // Point demo visitors at the parts they can't find from the chat alone.
+    const strip = $("demo-strip");
+    strip.hidden = false;
+    strip.append(
+      "Public demo · ",
+      el("a", { href: `/desk?tenant=${encodeURIComponent(tenantId)}` }, "Open the staff desk"),
+      " (one-tap demo logins) · ",
+      el("a", { href: `/display?tenant=${encodeURIComponent(tenantId)}`, target: "_blank", rel: "noopener" }, "Pickup screen"),
+    );
+  }
   const tenant = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}`);
 
   document.title = `${tenant.name} · Support`;

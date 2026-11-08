@@ -100,11 +100,12 @@ async function showLogin(message) {
   $("desk-view").hidden = true;
   $("login-view").hidden = false;
   if (message && message !== "Please log in") $("login-error").textContent = message;
+  const config = await loadConfig();
   if (!$("login-tenant").value) {
     const fromUrl = new URLSearchParams(location.search).get("tenant");
-    const config = await fetch("/api/config").then((r) => r.json()).catch(() => ({}));
     $("login-tenant").value = fromUrl || config.defaultTenant || "";
   }
+  renderDemoLogin(config.demo);
   $("login-username").value = readPref("desk-last-user", "");
   ($("login-username").value ? $("login-password") : $("login-username")).focus();
 }
@@ -135,8 +136,49 @@ $("logout").addEventListener("click", async () => {
   showLogin();
 });
 
+let configPromise = null;
+function loadConfig() {
+  configPromise ??= fetch("/api/config")
+    .then((r) => r.json())
+    .catch(() => ({}));
+  return configPromise;
+}
+
+/** Public demo: one-tap logins for the shared demo accounts. */
+function renderDemoLogin(demo) {
+  const box = $("demo-box");
+  box.hidden = !demo;
+  if (!demo) return;
+  const label = { staff: "Try as Barista (staff)", manager: "Try as Manager" };
+  box.replaceChildren(
+    h("strong", {}, "Public demo"),
+    h("p", { class: "muted" }, `Pick a role to look around. Data resets every day at ${demo.resetsAt}, and other visitors can see your changes.`),
+    ...demo.accounts.map((a) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "btn btn-ghost btn-block",
+          onclick: () => {
+            $("login-username").value = a.username;
+            $("login-password").value = a.pin;
+            $("login-form").requestSubmit();
+          },
+        },
+        label[a.role] ?? a.username,
+        h("small", { class: "muted" }, ` · ${a.username} / PIN ${a.pin}`),
+      ),
+    ),
+  );
+}
+
 async function enterDesk() {
   const info = state.info;
+  const config = await loadConfig();
+  $("demo-banner").hidden = !config.demo;
+  if (config.demo) {
+    $("demo-banner").textContent = `Public demo of a fictional café · resets daily at ${config.demo.resetsAt} · other visitors can see changes`;
+  }
   state.perms = new Set(info.permissions);
   const format = new Intl.NumberFormat(undefined, { style: "currency", currency: info.currency });
   money = (cents) => format.format(cents / 100);

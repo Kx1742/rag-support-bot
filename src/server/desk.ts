@@ -3,6 +3,7 @@ import { BOOKING_STATUSES, type BookingStatus } from "../shop/bookings.ts";
 import { ORDER_STATUSES, type OrderInput, type OrderStatus, PAYMENT_METHODS, type PaymentInput } from "../shop/orders.ts";
 import type { MenuItemInput } from "../shop/menu.ts";
 import type { Shop, ShopChange } from "../shop/shop.ts";
+import { isDemoAccount } from "../shop/demo.ts";
 import { OWNER_USERNAME, ROLES, type Role } from "../shop/staff.ts";
 import { isDate } from "../shop/time.ts";
 import { assertValidTenantId } from "../tenant.ts";
@@ -22,6 +23,8 @@ export interface DeskDeps {
   secureCookies?: boolean;
   /** Heartbeat interval for the live events stream. */
   heartbeatMs?: number;
+  /** Public demo: the shared demo accounts can't be changed. */
+  demo?: boolean;
 }
 
 /** Handles /api/desk/* routes. Returns false when the path isn't a desk route. */
@@ -211,6 +214,10 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
     need("staff.manage");
     const id = idParam(match[1]);
     const b = await readObject(req);
+    const target = shop.staff.get(id);
+    if (deps.demo && target && isDemoAccount(target.username)) {
+      throw new HttpError(403, "The shared demo accounts can't be changed in the public demo. Add your own staff account to try this.");
+    }
     if (id === user.staffId && (b.active === false || (b.role !== undefined && b.role !== "manager"))) {
       throw new HttpError(400, "You can't deactivate or demote your own account. Ask another manager.");
     }

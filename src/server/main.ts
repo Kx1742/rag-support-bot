@@ -1,10 +1,12 @@
-// Usage: npm start   (then open http://localhost:3000, staff desk at /desk)
+// Usage: npm start (or npm run start:demo for the public demo)   (then open http://localhost:3000, staff desk at /desk, pickup screen at /display)
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createAssistant, createProviders, loadEnv } from "../app.ts";
 import type { Assistant } from "../rag/assistant.ts";
+import { DEMO_ACCOUNTS, seedDemo } from "../shop/demo.ts";
 import { openShop, type Shop } from "../shop/shop.ts";
-import { TENANTS_DIR } from "../tenant.ts";
+import { zonedNow } from "../shop/time.ts";
+import { dataDir, TENANTS_DIR } from "../tenant.ts";
 import { passwordFromEnv, StaffAuth } from "./auth.ts";
 import { createAppServer } from "./http.ts";
 import { DailyCap, RateLimiter } from "./rateLimit.ts";
@@ -13,6 +15,10 @@ loadEnv();
 const env = process.env;
 const providers = createProviders(env);
 const port = Number(env.PORT ?? 3000);
+const defaultTenant = env.DEFAULT_TENANT ?? "bean-and-byte";
+const demo = env.DEMO_MODE === "1" || process.argv.includes("--demo");
+const DEMO_RESET_HOUR = Number(env.DEMO_RESET_HOUR ?? 4);
+const backupEveryHours = Number(env.BACKUP_EVERY_HOURS ?? 24);
 
 function tenantExists(tenantId: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,62}$/.test(tenantId) && existsSync(join(TENANTS_DIR, tenantId, "tenant.json"));
@@ -32,7 +38,12 @@ function cached<T>(load: (tenantId: string) => Promise<T>) {
   };
 }
 
-const loadShop = cached((tenantId) => openShop(tenantId));
+const openShops = new Set<Shop>();
+const loadShop = cached(async (tenantId) => {
+  const shop = await openShop(tenantId);
+  if (shop) openShops.add(shop);
+  return shop;
+});
 const getShop = async (tenantId: string): Promise<Shop | null> => (tenantExists(tenantId) ? loadShop(tenantId) : null);
 
 const loadAssistant = cached(async (tenantId) => createAssistant(tenantId, providers, await getShop(tenantId)));
@@ -45,7 +56,7 @@ const server = createAppServer({
   getShop,
   staffAuth,
   publicDir: resolve(import.meta.dirname, "..", "..", "public"),
-  defaultTenant: env.DEFAULT_TENANT ?? "bean-and-byte",
+  defaultTenant,
   limiter: new RateLimiter({
     capacity: Number(env.RATE_LIMIT_BURST ?? 5),
     perMinute: Number(env.RATE_LIMIT_PER_MINUTE ?? 10),
@@ -55,13 +66,86 @@ const server = createAppServer({
   trustProxy: env.TRUST_PROXY === "1",
   secureCookies: env.COOKIE_SECURE === "1",
   mode: providers.name,
+  demo: demo
+    ? {
+        accounts: DEMO_ACCOUNTS.map(({ username, pin, role }) => ({ username, pin, role })),
+        resetsAt: `${String(DEMO_RESET_HOUR).padStart(2, "0")}:00`,
+      }
+    : null,
 });
 
-server.listen(port, () => {
+// ---------- Public demo: seed on first start, reset every night ----------
+
+async function resetDemo(shop: Shop, reason: string): Promise<void> {
+  shop.resetData();
+  await seedDemo(shop);
+  staffAuth.endAll(shop.tenantId); // demo account ids changed
+  console.log(`Demo data ${reason} for ${shop.tenantId}.`);
+}
+
+function scheduleNightlyReset(shop: Shop): void {
+  const { minutes } = zonedNow(shop.config.timezone, new Date());
+  const minutesUntil = (DEMO_RESET_HOUR * 60 - minutes + 1440) % 1440 || 1440;
+  setTimeout(async () => {
+    try {
+      await resetDemo(shop, "reset");
+    } catch (err) {
+      console.error("Demo reset failed:", err);
+    }
+    scheduleNightlyReset(shop);
+  }, minutesUntil * 60_000).unref();
+}
+
+// ---------- Backups ----------
+
+function backupAll(): void {
+  for (const shop of openShops) {
+    try {
+      const file = shop.backup(join(dataDir(), shop.tenantId, "backups"));
+      console.log(`Backup saved: ${file}`);
+    } catch (err) {
+      console.error(`Backup failed for ${shop.tenantId}:`, err);
+    }
+  }
+}
+
+// ---------- Start & stop ----------
+
+server.listen(port, async () => {
   console.log(`Support bot running in ${providers.name.toUpperCase()} mode at http://localhost:${port}`);
-  console.log(`Staff desk: http://localhost:${port}/desk`);
-  if (!staffAuth.ownerEnabled(env.DEFAULT_TENANT ?? "bean-and-byte")) {
-    console.log("No owner password: set STAFF_PASSWORD (8+ characters) in .env to log in as \"owner\" and add staff accounts.");
+  console.log(`Staff desk: http://localhost:${port}/desk · Pickup screen: http://localhost:${port}/display`);
+  console.log(`Data folder: ${dataDir()}`);
+
+  if (demo) {
+    const shop = await getShop(defaultTenant);
+    if (shop) {
+      if (shop.staff.count() === 0) await resetDemo(shop, "loaded");
+      scheduleNightlyReset(shop);
+      console.log(
+        `PUBLIC DEMO MODE: logins ${DEMO_ACCOUNTS.map((a) => `${a.username}/${a.pin}`).join(", ")}; data resets daily at ${String(DEMO_RESET_HOUR).padStart(2, "0")}:00 (${shop.config.timezone}).`,
+      );
+    }
+  } else if (!staffAuth.ownerEnabled(defaultTenant)) {
+    console.log('No owner password: set STAFF_PASSWORD (8+ characters) in .env to log in as "owner" and add staff accounts.');
   }
   if (providers.name === "offline") console.log("Chat bookings need Gemini; in offline mode customers use the booking form.");
+
+  if (backupEveryHours > 0) {
+    await getShop(defaultTenant); // make sure the main shop is open so it gets backed up
+    backupAll();
+    setInterval(backupAll, backupEveryHours * 3_600_000).unref();
+  }
 });
+
+/** Finish open requests and close the databases cleanly when the host stops the app. */
+function shutdown(signal: string): void {
+  console.log(`${signal} received, shutting down...`);
+  server.close(() => {
+    for (const shop of openShops) shop.close();
+    process.exit(0);
+  });
+  server.closeAllConnections(); // live streams would otherwise keep it open
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

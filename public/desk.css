@@ -2592,3 +2592,26 @@ a.btn {
   background: var(--ready-bg);
   color: var(--ready);
 }
+
+/* Public demo */
+.demo-box {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--brand);
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+}
+
+.demo-box .btn {
+  justify-content: flex-start;
+}
+
+.demo-banner {
+  padding: 6px 16px;
+  background: #ffb547;
+  color: #2b1d14;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}

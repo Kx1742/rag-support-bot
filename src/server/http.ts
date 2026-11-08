@@ -39,6 +39,8 @@ export interface ServerDeps {
   secureCookies?: boolean;
   mode?: string;
   log?: (message: string) => void;
+  /** Public demo settings shown to visitors (demo logins, reset time). */
+  demo?: { accounts: { username: string; pin: string; role: string }[]; resetsAt: string } | null;
 }
 
 /** Only these files are served, so no path tricks can reach anything else. */
@@ -95,7 +97,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
   }
 
   if (req.method === "GET" && path === "/api/config") {
-    sendJson(res, 200, { defaultTenant: deps.defaultTenant, mode: deps.mode ?? "unknown" });
+    sendJson(res, 200, { defaultTenant: deps.defaultTenant, mode: deps.mode ?? "unknown", demo: deps.demo ?? null });
     return;
   }
 
@@ -106,6 +108,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       loginLimiter: deps.loginLimiter,
       trustProxy: deps.trustProxy,
       secureCookies: deps.secureCookies,
+      demo: !!deps.demo,
     });
     if (handled) return;
   }

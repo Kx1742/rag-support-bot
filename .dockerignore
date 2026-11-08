@@ -1,0 +1,11 @@
+.git
+.github
+.claude
+node_modules
+data
+test
+.env
+.env.*
+!.env.example
+*.md
+!tenants/**/*.md
