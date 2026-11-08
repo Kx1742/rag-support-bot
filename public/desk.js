@@ -180,7 +180,8 @@ async function enterDesk() {
     $("demo-banner").textContent = `Public demo of a fictional café · resets daily at ${config.demo.resetsAt} · other visitors can see changes`;
   }
   state.perms = new Set(info.permissions);
-  const format = new Intl.NumberFormat(undefined, { style: "currency", currency: info.currency });
+  // The shop's locale, not the browser's: a US café should show "$4.75" everywhere, not "US$4.75".
+  const format = new Intl.NumberFormat(info.locale ?? "en-US", { style: "currency", currency: info.currency });
   money = (cents) => format.format(cents / 100);
 
   $("login-view").hidden = true;

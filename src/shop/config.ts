@@ -39,6 +39,8 @@ export interface OptionGroup {
 export interface ShopConfig {
   timezone: string;
   currency: string;
+  /** How money and dates are formatted on screens, e.g. "en-US" (default). */
+  locale?: string;
   /** Prefix for booking references, e.g. "BB" -> "BB-7K3QX". */
   referencePrefix: string;
   /** Missing day = closed. Times are "HH:MM" in the shop's timezone. */

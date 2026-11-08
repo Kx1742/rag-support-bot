@@ -1,6 +1,7 @@
 {
   "timezone": "America/New_York",
   "currency": "USD",
+  "locale": "en-US",
   "referencePrefix": "BB",
   "openingHours": {
     "mon": [

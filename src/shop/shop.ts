@@ -95,6 +95,11 @@ export class Shop {
     return file;
   }
 
+  /** Cheap query to prove the database is reachable (used by the health check). */
+  ping(): void {
+    this.db.prepare("SELECT 1").get();
+  }
+
   close(): void {
     this.db.close();
   }

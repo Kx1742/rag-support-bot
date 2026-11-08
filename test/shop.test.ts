@@ -64,6 +64,14 @@ describe("booking availability", () => {
     assert.match(tooSoon.reason!, /60 minutes' notice/);
   });
 
+  it("says the day is over rather than 'fully booked' late in the day", async () => {
+    const { shop } = await makeShop(new Date("2026-11-13T21:00:00Z")); // Friday 16:00, last slot 16:30, 60 min notice
+    const { times, reason } = shop.bookings.availableTimes("2026-11-13", 2);
+    assert.deepEqual(times, []);
+    assert.match(reason!, /no more booking times today/);
+    assert.doesNotMatch(reason!, /fully booked/);
+  });
+
   it("explains closed, past and too-far dates", async () => {
     const { shop } = await makeShop();
     assert.match(shop.bookings.availableTimes("2026-12-25", 2, { staff: true }).reason!, /closed on Friday, 25 December 2026/);

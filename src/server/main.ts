@@ -1,5 +1,5 @@
 // Usage: npm start (or npm run start:demo for the public demo)   (then open http://localhost:3000, staff desk at /desk, pickup screen at /display)
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createAssistant, createProviders, loadEnv } from "../app.ts";
 import type { Assistant } from "../rag/assistant.ts";
@@ -66,6 +66,8 @@ const server = createAppServer({
   trustProxy: env.TRUST_PROXY === "1",
   secureCookies: env.COOKIE_SECURE === "1",
   mode: providers.name,
+  logRequests: env.LOG_REQUESTS ? env.LOG_REQUESTS === "1" : env.NODE_ENV === "production",
+  version: packageVersion(),
   demo: demo
     ? {
         accounts: DEMO_ACCOUNTS.map(({ username, pin, role }) => ({ username, pin, role })),
@@ -73,6 +75,15 @@ const server = createAppServer({
       }
     : null,
 });
+
+function packageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "..", "package.json"), "utf8")) as { version?: string };
+    return pkg.version ?? "dev";
+  } catch {
+    return "dev";
+  }
+}
 
 // ---------- Public demo: seed on first start, reset every night ----------
 

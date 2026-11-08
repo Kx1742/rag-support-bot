@@ -20,7 +20,21 @@ It's multi-tenant: each business is a folder with its own documents, menu, table
 **Live demo:** _coming soon_ <!-- TODO: paste the Render URL here after deploying -->
 In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager**. The data resets every night.
 
-<!-- TODO: add screenshots or a GIF of the chat and the desk here -->
+## Screenshots
+
+| Kitchen display | Till with a loyalty reward |
+|---|---|
+| ![Kitchen display: orders by stage with waiting timers, paid/unpaid labels and an online pickup order](docs/screenshots/desk-kitchen.png) | ![Till: drink options, a loyalty member using a free-drink reward, and the charge button](docs/screenshots/desk-till.png) |
+
+| Bookings and live table map | End-of-day report (managers) |
+|---|---|
+| ![Bookings: table map showing seated, reserved and free tables, plus arriving and seated bookings](docs/screenshots/desk-bookings.png) | ![Report: paid sales, cash vs card, unpaid, refunds, best sellers and sales by hour](docs/screenshots/desk-report.png) |
+
+| Customer chat: order ahead | Pickup screen | Phone |
+|---|---|---|
+| ![Chat with the order-ahead card: menu, drink options, cart and pickup time](docs/screenshots/chat-order-ahead.png) | ![Pickup screen with order numbers preparing and ready to collect](docs/screenshots/pickup-screen.png) | ![The chat on a phone with the table booking form](docs/screenshots/phone-chat.png) |
+
+<sub>Captured from the public demo with `npm run screenshots`, which drives a headless Edge/Chrome, so they're easy to refresh after design changes.</sub>
 
 ## Features
 
@@ -67,7 +81,9 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Prices and option surcharges always come from the server, never from the browser
 - Duplicate-order protection: each till order carries an idempotency key, so a network retry can't charge twice
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
-- 135 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
+  response (shown to visitors on errors), request logs that never include query strings
+- 140 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
@@ -158,6 +174,8 @@ them. Unexpected errors are not.
 | Server-Sent Events for the desk | Simple one-way live updates over plain HTTP. |
 | Demo data created through the normal services | The demo follows the same rules as real use, and seeding tests those rules too. |
 | `VACUUM INTO` for backups | A consistent snapshot while the app keeps running, with no extra tools. |
+| Money formatted in the shop's locale, not the browser's | A US café shows "$4.75" on every till, not "US$4.75" on a till set to another region. |
+| Request logs keep the path only | Query strings can contain phone numbers; logs shouldn't. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
 ## Getting started
@@ -182,8 +200,9 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 135 tests
+npm test                      # 140 tests
 npm run typecheck
+npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
 
 ### Public demo mode
@@ -274,7 +293,8 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 - [x] Chatbot reads the live menu; customer pickup screen
 - [x] Loyalty points and order ahead
 - [x] Deploy-ready: public demo mode, Dockerfile, Render blueprint, backups
-- [ ] Put the live demo URL and screenshots in this README
+- [x] Screenshots in this README
+- [ ] Put the live demo URL in this README
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 
 ## Privacy note

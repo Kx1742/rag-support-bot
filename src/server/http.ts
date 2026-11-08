@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -41,6 +42,10 @@ export interface ServerDeps {
   log?: (message: string) => void;
   /** Public demo settings shown to visitors (demo logins, reset time). */
   demo?: { accounts: { username: string; pin: string; role: string }[]; resetsAt: string } | null;
+  /** Log one line per API request (method, path, status, time). */
+  logRequests?: boolean;
+  /** App version shown by /api/health. */
+  version?: string;
 }
 
 /** Only these files are served, so no path tricks can reach anything else. */
@@ -64,15 +69,26 @@ export function createAppServer(deps: ServerDeps): Server {
   const log = deps.log ?? ((m: string) => console.log(m));
 
   return createServer(async (req, res) => {
+    // A short id on every response, so a visitor's error report can be matched to the log.
+    const requestId = randomUUID().slice(0, 8);
+    const started = performance.now();
+    // Only the path is ever logged: query strings can hold phone numbers (e.g. loyalty lookups).
+    const path = (req.url ?? "/").split("?")[0];
+    res.setHeader("X-Request-Id", requestId);
+    if (deps.secureCookies) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    if (deps.logRequests && path.startsWith("/api/") && path !== "/api/health") {
+      res.on("close", () => log(`${req.method} ${path} ${res.statusCode} ${Math.round(performance.now() - started)}ms [${requestId}]`));
+    }
+
     try {
       await route(req, res, deps);
     } catch (err) {
       const status = statusFor(err);
-      if (status === 500) log(`Error on ${req.method} ${req.url}: ${(err as Error).stack ?? err}`);
+      if (status === 500) log(`Error [${requestId}] on ${req.method} ${path}: ${(err as Error).stack ?? err}`);
       if (res.headersSent) {
         res.end();
       } else {
-        sendJson(res, status, { error: status === 500 ? "Something went wrong" : (err as Error).message });
+        sendJson(res, status, status === 500 ? { error: "Something went wrong", requestId } : { error: (err as Error).message });
       }
     }
   });
@@ -91,8 +107,26 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     return;
   }
 
+  // Health check for the host: also proves the main database answers.
   if (req.method === "GET" && path === "/api/health") {
-    sendJson(res, 200, { ok: true, mode: deps.mode ?? "unknown" });
+    let database = "none";
+    try {
+      const shop = await getShop(deps.defaultTenant);
+      if (shop) {
+        shop.ping();
+        database = "ok";
+      }
+    } catch {
+      database = "error";
+    }
+    const ok = database !== "error";
+    sendJson(res, ok ? 200 : 503, {
+      ok,
+      mode: deps.mode ?? "unknown",
+      version: deps.version ?? "dev",
+      uptimeSeconds: Math.round(process.uptime()),
+      database,
+    });
     return;
   }
 

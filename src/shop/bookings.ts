@@ -102,8 +102,13 @@ export class BookingService {
     const closed = this.dayProblem(date, opts.staff);
     if (closed) return { times: [], reason: closed };
 
+    // No slots left at all (late in the day) is different from every slot being taken.
+    const starts = this.slotStarts(date, opts.staff);
+    if (starts.length === 0) {
+      return { times: [], reason: `There are no more booking times today. Please choose another day.` };
+    }
     const busy = this.busyByTable(date);
-    const times = this.slotStarts(date, opts.staff).filter(
+    const times = starts.filter(
       (start) => this.freeTable(busy, start, start + this.config.booking.durationMinutes, partySize, opts.tableId) !== null,
     );
     return times.length

@@ -291,6 +291,7 @@ function deskInfo(shop: Shop, user: CurrentUser & { tenantId?: string }) {
     roles: ROLES,
     timezone: shop.config.timezone,
     currency: shop.config.currency,
+    locale: shop.config.locale ?? "en-US",
     today: shop.bookings.today().date,
     tables: shop.config.tables,
     loyalty: shop.config.loyalty
