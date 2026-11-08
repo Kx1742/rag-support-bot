@@ -56,6 +56,11 @@ export interface ShopConfig {
   tables: TableConfig[];
   menu: MenuItemConfig[];
   optionGroups?: OptionGroup[];
+  /**
+   * Optional prep stations for the kitchen display, e.g. a bar for drinks and a kitchen for food.
+   * Each screen can show just its station's items.
+   */
+  stations?: { id: string; name: string; categories: string[] }[];
   /** Optional loyalty program. Leave out to turn loyalty off. */
   loyalty?: LoyaltyConfig;
   /** Optional order-ahead (pickup) settings. Leave out to turn online ordering off. */
@@ -172,6 +177,12 @@ export function validateShopConfig(c: ShopConfig): void {
       }
       rewardIds.add(r.id);
     }
+  }
+  const stationIds = new Set<string>();
+  for (const st of c.stations ?? []) {
+    if (!/^[a-z0-9-]+$/.test(st.id) || stationIds.has(st.id)) fail(`duplicate or invalid station id "${st.id}"`);
+    if (!st.name || !st.categories?.length) fail(`station ${st.id} needs a name and at least one category`);
+    stationIds.add(st.id);
   }
   if (c.orderAhead) {
     const o = c.orderAhead;

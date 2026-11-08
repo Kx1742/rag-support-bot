@@ -56,6 +56,7 @@ async function init() {
     if (enabled) $(id).addEventListener("click", open);
   }
   $("quick-actions").hidden = !actions.some(([, enabled]) => enabled);
+  if (tenant.orderAhead) restoreTrackedOrders();
   if (tenant.loyalty) $("points-btn").lastChild.textContent = ` My ${tenant.loyalty.name}`;
 
   for (const question of tenant.suggestedQuestions) {
@@ -747,24 +748,9 @@ async function openOrderCard() {
       const out = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(out.error || `Order failed (${res.status})`);
       form.remove();
-      const o = out.order;
-      addCard(
-        el(
-          "div",
-          { class: "booking-card confirmed" },
-          el("strong", {}, "✓ Order placed"),
-          el("div", { class: "ref" }, `#${String(o.number).padStart(3, "0")}`),
-          el("div", {}, `Pickup ${o.pickupTime === "asap" ? "as soon as possible" : `at ${o.pickupTime}`} · ${money(o.total)} to pay at the counter`),
-          ...o.items.map((i) => el("div", { class: "hint" }, `${i.quantity}× ${i.name}${i.optionsLabel ? ` · ${i.optionsLabel}` : ""}`)),
-          el(
-            "div",
-            { class: "hint" },
-            o.memberPoints
-              ? `Watch the pickup screen for #${String(o.number).padStart(3, "0")}. You'll earn ${tenantInfo.loyalty?.name ?? "points"} when you pay.`
-              : `Watch the pickup screen for #${String(o.number).padStart(3, "0")}.`,
-          ),
-        ),
-      );
+      unlockSound(); // the customer just tapped, so the "ready" chime is allowed later
+      rememberOrder(out.order.trackingToken);
+      trackOrder(out.order);
     } catch (err) {
       error.textContent = err.message;
       submit.disabled = cart.length === 0;
@@ -827,6 +813,175 @@ function openPointsCard() {
   });
   addCard(form);
   phone.focus();
+}
+
+// ---------- Live order tracking ----------
+
+const ORDER_STEPS = [
+  { status: "new", label: "Received" },
+  { status: "preparing", label: "Being made" },
+  { status: "ready", label: "Ready to collect" },
+];
+
+/**
+ * A card that follows an online order live: Received → Being made → Ready to collect.
+ * Uses the order's private tracking token, so only the person who ordered can follow it.
+ */
+function trackOrder(order) {
+  const number = `#${String(order.number).padStart(3, "0")}`;
+  const money = (cents) => `$${(cents / 100).toFixed(2)}`;
+  const steps = el("ol", { class: "order-steps" });
+  const headline = el("strong", {}, "✓ Order placed");
+  const status = el("div", { class: "order-status-text" });
+  const card = el(
+    "div",
+    { class: "booking-card confirmed tracking-card", "aria-live": "polite" },
+    headline,
+    el("div", { class: "ref" }, number),
+    steps,
+    status,
+    el("div", {}, `Pickup ${order.pickupTime === "asap" ? "as soon as possible" : `at ${order.pickupTime}`} · ${money(order.total)} to pay at the counter`),
+    ...order.items.map((i) => el("div", { class: "hint" }, `${i.quantity}× ${i.name}${i.optionsLabel ? ` · ${i.optionsLabel}` : ""}`)),
+    order.memberPoints ? el("div", { class: "hint" }, `You'll earn ${tenantInfo.loyalty?.name ?? "points"} when you pay.`) : null,
+  );
+
+  let last = null;
+  const show = (s) => {
+    if (s === last) return;
+    const firstUpdate = last === null;
+    last = s;
+    const index = ORDER_STEPS.findIndex((x) => x.status === s);
+    steps.replaceChildren(
+      ...ORDER_STEPS.map((step, i) =>
+        el("li", { class: s === "completed" || i < index ? "done" : i === index ? "current" : "" }, step.label),
+      ),
+    );
+    card.classList.toggle("is-ready", s === "ready");
+    card.classList.toggle("is-cancelled", s === "cancelled");
+    if (s === "new") status.textContent = "We've got your order. We'll start on it shortly.";
+    if (s === "preparing") status.textContent = "We're making your order now.";
+    if (s === "ready") {
+      headline.textContent = "🔔 Your order is ready!";
+      status.textContent = `Collect ${number} at the counter.`;
+      if (!firstUpdate) {
+        chime();
+        flashTitle(`Ready: ${number}`);
+      }
+    }
+    if (s === "completed") {
+      headline.textContent = "✓ Collected. Enjoy!";
+      status.textContent = "";
+      forgetOrder(order.trackingToken);
+    }
+    if (s === "cancelled") {
+      headline.textContent = "Order cancelled";
+      status.textContent = "This order was cancelled. Please contact the café if that's unexpected.";
+      forgetOrder(order.trackingToken);
+    }
+  };
+  show(order.status ?? "new");
+  addCard(card);
+
+  if (!order.trackingToken || ["completed", "cancelled"].includes(order.status)) return;
+  const url = `/api/tenants/${encodeURIComponent(tenantId)}/orders/track/events?token=${encodeURIComponent(order.trackingToken)}`;
+  const source = new EventSource(url);
+  source.addEventListener("status", (e) => {
+    const s = JSON.parse(e.data).status;
+    show(s);
+    if (s === "completed" || s === "cancelled") source.close();
+  });
+}
+
+/** Remembers tracked orders in this browser so a reload doesn't lose them. */
+function trackedKey() {
+  return `tracked-orders:${tenantId}`;
+}
+
+function rememberOrder(token) {
+  if (!token) return;
+  try {
+    const list = JSON.parse(localStorage.getItem(trackedKey()) ?? "[]").filter((t) => t !== token);
+    localStorage.setItem(trackedKey(), JSON.stringify([...list, token].slice(-5)));
+  } catch {
+    /* storage blocked: tracking works until the page is closed */
+  }
+}
+
+function forgetOrder(token) {
+  try {
+    const list = JSON.parse(localStorage.getItem(trackedKey()) ?? "[]").filter((t) => t !== token);
+    localStorage.setItem(trackedKey(), JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** On page load: show cards for orders that are still being made or waiting. */
+async function restoreTrackedOrders() {
+  let tokens = [];
+  try {
+    tokens = JSON.parse(localStorage.getItem(trackedKey()) ?? "[]");
+  } catch {
+    return;
+  }
+  for (const token of tokens) {
+    try {
+      const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/orders/track?token=${encodeURIComponent(token)}`);
+      if (!res.ok) {
+        forgetOrder(token);
+        continue;
+      }
+      const { order } = await res.json();
+      if (["completed", "cancelled"].includes(order.status)) forgetOrder(token);
+      else trackOrder({ ...order, trackingToken: token });
+    } catch {
+      /* offline: try again next visit */
+    }
+  }
+}
+
+let audioCtx = null;
+function unlockSound() {
+  try {
+    audioCtx ??= new AudioContext();
+    audioCtx.resume();
+  } catch {
+    /* no audio */
+  }
+}
+
+function chime() {
+  if (!audioCtx || audioCtx.state !== "running") return;
+  const t = audioCtx.currentTime;
+  [660, 880, 1100].forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const at = t + i * 0.18;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.5);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(at);
+    osc.stop(at + 0.55);
+  });
+}
+
+/** Flashes the tab title until the customer looks at the page. */
+function flashTitle(text) {
+  const original = document.title;
+  let on = false;
+  const timer = setInterval(() => {
+    document.title = (on = !on) ? text : original;
+  }, 1000);
+  const stop = () => {
+    clearInterval(timer);
+    document.title = original;
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+  const onVisible = () => document.visibilityState === "visible" && stop();
+  document.addEventListener("visibilitychange", onVisible);
+  setTimeout(stop, document.visibilityState === "visible" ? 6000 : 600000);
 }
 
 function shiftDate(date, days) {

@@ -44,6 +44,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - "Book a table" form in the chat, which also works without AI
 - **Order ahead**: pick items and drink options, choose a pickup time, pay at the counter; the order
   appears on the kitchen screen and the pickup screen
+- **Live order tracking**: the confirmation card follows the order (Received → Being made → Ready to
+  collect) and chimes when it's ready; it survives a page reload and uses a private per-order link
 - **My booking**: look up or cancel your own booking with its reference + phone number
 - **My points**: check a loyalty balance and rewards by phone number
 - **Knows what's sold out**: with Gemini it reads the live menu (prices, sold out, "only 3 left");
@@ -70,6 +72,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
   redeem rewards (free pastry 50, free drink 100, breakfast combo 250); the reward makes the most
   expensive matching item free; points come back on cancel/refund and expire after 12 months idle
 - **Online orders** show on the kitchen screen with an Online label, pickup time and tap-to-call phone
+- **Bar / Kitchen screens**: each kitchen display can show just its station's items (set in `shop.json`),
+  so the barista sees drinks and the kitchen sees food; each device remembers its choice
 - **Refunds** (managers): with a reason; paid orders can't simply be cancelled
 - **End-of-day report** (managers): sales, cash vs card, unpaid, refunds, best sellers, sales by hour, CSV export
 - **Staff accounts** (managers): add people, change roles, reset PINs, deactivate
@@ -83,7 +87,7 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
-- 140 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 146 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
@@ -171,6 +175,8 @@ them. Unexpected errors are not.
 | Pickup screen gets numbers only | It's public, so it can't leak names or orders. |
 | Points spent and earned inside the order's transaction, with a ledger row for every change | A failed order never costs points, and every balance can be explained. |
 | Public points lookup returns points and rewards only | Knowing a phone number doesn't reveal a name or history. |
+| Order tracking by a random per-order token, sent only once (to the person who ordered) | Order numbers are guessable; tokens aren't, so nobody can follow someone else's order. |
+| Each order line stores its menu category | Bar/kitchen screens keep working even after the menu is edited. |
 | Server-Sent Events for the desk | Simple one-way live updates over plain HTTP. |
 | Demo data created through the normal services | The demo follows the same rules as real use, and seeding tests those rules too. |
 | `VACUUM INTO` for backups | A consistent snapshot while the app keeps running, with no extra tools. |
@@ -200,7 +206,7 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 140 tests
+npm test                      # 146 tests
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
@@ -266,7 +272,8 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 | `GET` | `/api/tenants/:id/availability?date=&partySize=` | Free booking times |
 | `GET` | `/api/tenants/:id/pickup`, `.../pickup/events` | Pickup screen numbers and live updates (public) |
 | `GET` | `/api/tenants/:id/menu` | Public menu and today's pickup times |
-| `POST` | `/api/tenants/:id/orders` | Order ahead: `{ name, phone, pickupTime, items, clientRef? }` |
+| `POST` | `/api/tenants/:id/orders` | Order ahead: `{ name, phone, pickupTime, items, clientRef? }`; returns a `trackingToken` |
+| `GET` | `/api/tenants/:id/orders/track?token=`, `.../track/events?token=` | The customer's order status, and live updates (SSE) |
 | `POST` | `/api/tenants/:id/loyalty` | Points balance: `{ phone }` |
 | `POST` | `/api/tenants/:id/bookings` | Book a table: `{ date, time, partySize, name, phone, notes? }` |
 | `POST` | `/api/tenants/:id/bookings/lookup`, `.../cancel` | Customer: `{ reference, phone }` |

@@ -294,6 +294,7 @@ function deskInfo(shop: Shop, user: CurrentUser & { tenantId?: string }) {
     locale: shop.config.locale ?? "en-US",
     today: shop.bookings.today().date,
     tables: shop.config.tables,
+    stations: shop.config.stations ?? [],
     loyalty: shop.config.loyalty
       ? { name: shop.config.loyalty.name, pointsPerDollar: shop.config.loyalty.pointsPerDollar, rewards: shop.config.loyalty.rewards }
       : null,

@@ -148,7 +148,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
   }
 
   const tenantMatch =
-    /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel|pickup|pickup\/events|menu|orders|loyalty))?$/.exec(path);
+    /^\/api\/tenants\/([^/]+)(?:\/(chat|availability|bookings|bookings\/lookup|bookings\/cancel|pickup|pickup\/events|menu|orders|orders\/track|orders\/track\/events|loyalty))?$/.exec(path);
   if (tenantMatch) {
     const tenantId = decodeURIComponent(tenantMatch[1]);
     const assistant = await deps.getAssistant(tenantId);
@@ -203,7 +203,36 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
         },
         b.clientRef === undefined ? undefined : String(b.clientRef),
       );
-      sendJson(res, 201, { order: shop.orders.toPublic(order) });
+      // The token is only ever sent here, to the customer who just placed the order.
+      sendJson(res, 201, { order: shop.orders.toPublic(order, { withToken: true }) });
+      return;
+    }
+    // Live order status for the customer who holds the private tracking token.
+    if (action === "orders/track" && req.method === "GET") {
+      const order = shop.orders.byTrackingToken(url.searchParams.get("token") ?? "");
+      if (!order) throw new HttpError(404, "Order not found");
+      sendJson(res, 200, { order: shop.orders.toPublic(order) });
+      return;
+    }
+    if (action === "orders/track/events" && req.method === "GET") {
+      const order = shop.orders.byTrackingToken(url.searchParams.get("token") ?? "");
+      if (!order) throw new HttpError(404, "Order not found");
+      if (publicStreams >= MAX_PUBLIC_STREAMS) throw new HttpError(503, "Too many screens connected");
+      publicStreams++;
+      startSse(res);
+      sendSse(res, "status", { status: order.status });
+      const onChange = (change: ShopChange) => {
+        if (change.kind !== "order" || Number(change.id) !== order.id) return;
+        const now = shop.orders.get(order.id);
+        if (now) sendSse(res, "status", { status: now.status });
+      };
+      const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), 25_000);
+      shop.events.on("change", onChange);
+      req.on("close", () => {
+        publicStreams--;
+        clearInterval(heartbeat);
+        shop.events.off("change", onChange);
+      });
       return;
     }
     // Loyalty balance: points and rewards only (no name or history), by phone number.

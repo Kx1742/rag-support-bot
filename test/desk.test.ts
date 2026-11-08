@@ -382,7 +382,7 @@ describe("desk and booking HTTP API", async () => {
     const { order } = await placed.json();
     assert.equal(order.total, 545);
     assert.equal(order.memberPoints, true);
-    assert.deepEqual(Object.keys(order).sort(), ["items", "memberPoints", "number", "pickupTime", "status", "total"]);
+    assert.deepEqual(Object.keys(order).sort(), ["items", "memberPoints", "number", "pickupTime", "status", "total", "trackingToken"]);
 
     const desks = await (await desk("/orders", { cookie: managerCookie })).json();
     const seen = desks.orders.find((x: { number: number }) => x.number === order.number);

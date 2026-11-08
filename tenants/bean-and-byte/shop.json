@@ -388,5 +388,22 @@
     "prepMinutes": 10,
     "maxItems": 20,
     "maxOpenPerPhone": 3
-  }
+  },
+  "stations": [
+    {
+      "id": "bar",
+      "name": "Bar",
+      "categories": [
+        "Coffee",
+        "Not Coffee"
+      ]
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen",
+      "categories": [
+        "Food"
+      ]
+    }
+  ]
 }

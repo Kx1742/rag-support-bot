@@ -2615,3 +2615,33 @@ a.btn {
   font-weight: 700;
   text-align: center;
 }
+
+/* Bar / kitchen station filter */
+.station-filter {
+  display: flex;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.station-filter button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.station-filter button[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.order-items .other-station {
+  color: var(--muted);
+  font-size: 14px;
+  font-style: italic;
+}

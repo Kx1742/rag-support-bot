@@ -131,6 +131,12 @@ const MIGRATIONS = [
   ALTER TABLE orders ADD COLUMN pickup_time TEXT;
   ALTER TABLE orders ADD COLUMN customer_phone TEXT NOT NULL DEFAULT '';
   `,
+  // 5: live order tracking for customers + kitchen stations
+  `
+  ALTER TABLE orders ADD COLUMN tracking_token TEXT;   -- private link token for online orders
+  CREATE UNIQUE INDEX orders_by_tracking_token ON orders (tracking_token) WHERE tracking_token IS NOT NULL;
+  ALTER TABLE order_items ADD COLUMN category TEXT;     -- menu category at order time (for bar/kitchen screens)
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */

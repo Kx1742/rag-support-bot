@@ -58,6 +58,7 @@ const state = {
   // live
   events: null,
   sound: readPref("desk-sound", "on") === "on",
+  station: readPref("desk-station", "all"), // which prep station this screen shows
 };
 
 let money = (cents) => `$${(cents / 100).toFixed(2)}`;
@@ -201,6 +202,7 @@ async function enterDesk() {
   state.reportDate ??= state.now.date;
   renderSoundToggle();
   renderTableChips();
+  renderStationFilter();
   showTab(state.tab);
 
   await Promise.all([loadMenu(), loadOrders(), loadBookings()]);
@@ -1066,6 +1068,43 @@ async function loadOrders() {
   renderOrders();
 }
 
+/** Station filter: which of an order's lines this screen should show. */
+function stationLines(order) {
+  const station = state.info?.stations?.find((st) => st.id === state.station);
+  if (!station) return { mine: order.items, others: 0 };
+  const categoryOf = (l) => l.category ?? state.menu.find((m) => m.id === l.itemId)?.category ?? null;
+  // Items with no known category show everywhere, so nothing is ever lost.
+  const mine = order.items.filter((l) => !categoryOf(l) || station.categories.includes(categoryOf(l)));
+  return { mine, others: order.items.length - mine.length };
+}
+
+function renderStationFilter() {
+  const stations = state.info?.stations ?? [];
+  $("station-filter").hidden = stations.length === 0;
+  if (!stations.some((st) => st.id === state.station)) state.station = "all";
+  $("station-filter").replaceChildren(
+    ...[{ id: "all", name: "All" }, ...stations].map((st) =>
+      h(
+        "button",
+        {
+          type: "button",
+          role: "radio",
+          "aria-checked": String(state.station === st.id),
+          onclick: () => {
+            state.station = st.id;
+            writePref("desk-station", st.id);
+            renderStationFilter();
+            renderOrders();
+          },
+        },
+        st.name,
+      ),
+    ),
+  );
+  $("orders-hint").textContent =
+    state.station === "all" ? "Oldest first. Timers turn amber at 5 minutes and red at 10." : "Showing this station's items only. This screen remembers the choice.";
+}
+
 function renderOrders() {
   const s = state.summary;
   if (!s) return;
@@ -1082,7 +1121,7 @@ function renderOrders() {
 
   const seen = state.seenOrderIds;
   for (const status of ["new", "preparing", "ready"]) {
-    const list = state.orders.filter((o) => o.status === status);
+    const list = state.orders.filter((o) => o.status === status && stationLines(o).mine.length > 0);
     $(`count-${status}`).textContent = String(list.length);
     $(`col-${status}`).replaceChildren(
       ...(list.length
@@ -1183,9 +1222,12 @@ function orderCard(o, isNew) {
     h(
       "ul",
       { class: "order-items" },
-      ...o.items.map((l) =>
+      ...stationLines(o).mine.map((l) =>
         h("li", {}, h("b", {}, `${l.quantity}×`), ` ${l.name}`, l.optionsLabel ? h("small", {}, l.optionsLabel) : null, l.note ? h("em", {}, l.note) : null),
       ),
+      stationLines(o).others
+        ? h("li", { class: "other-station" }, `+ ${stationLines(o).others} item${stationLines(o).others === 1 ? "" : "s"} for another station`)
+        : null,
     ),
     o.notes ? h("div", { class: "note" }, o.notes) : null,
     h(

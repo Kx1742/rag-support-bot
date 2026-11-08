@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { normalizePhone } from "./bookings.ts";
 import type { ShopConfig } from "./config.ts";
@@ -44,6 +45,8 @@ export interface OrderLine {
   /** Non-default choices for display, e.g. "Large · Oat milk · Extra shot". */
   optionsLabel: string;
   lineTotal: number;
+  /** Menu category when ordered (null for orders from before this was recorded). */
+  category: string | null;
 }
 
 export interface Payment {
@@ -85,6 +88,8 @@ export interface Order {
   /** Online orders: "asap" or "HH:MM" today. */
   pickupTime: string | null;
   customerPhone: string;
+  /** Private token for the customer's live tracking link (online orders only). */
+  trackingToken: string | null;
   createdBy: string;
   createdAt: string;
 }
@@ -99,6 +104,8 @@ export interface PublicOrder {
   pickupTime: string | null;
   items: { name: string; quantity: number; optionsLabel: string }[];
   memberPoints: boolean;
+  /** Only given to the customer right after ordering, so they can follow the order live. */
+  trackingToken?: string;
 }
 
 export interface OrderLineInput {
@@ -131,7 +138,7 @@ export interface OnlineOrderInput {
   notes?: string;
 }
 
-type PricedLine = Omit<OrderLine, "optionsLabel" | "lineTotal"> & { category: string };
+type PricedLine = Omit<OrderLine, "optionsLabel" | "lineTotal" | "category"> & { category: string };
 
 export interface PaymentInput {
   method: PaymentMethod;
@@ -201,13 +208,20 @@ export class OrderService {
     const member = this.loyalty?.enabled ? this.loyalty.find(phone) : null;
     return this.create(
       { type: "takeaway", customerName: name, notes: input.notes, items: input.items, memberId: member?.id ?? null },
-      { by: { name: "Online" }, clientRef, source: "online", pickupTime, customerPhone: phone },
+      { by: { name: "Online" }, clientRef, source: "online", pickupTime, customerPhone: phone, trackingToken: randomBytes(18).toString("base64url") },
     );
   }
 
+  /** Finds an order by its private tracking token (for the customer's live status). */
+  byTrackingToken(token: string): Order | null {
+    if (!/^[A-Za-z0-9_-]{20,40}$/.test(String(token ?? ""))) return null;
+    return this.load(`WHERE tracking_token = ?`, [token])[0] ?? null;
+  }
+
   /** Public view of an order for the customer who placed it. */
-  toPublic(order: Order): PublicOrder {
+  toPublic(order: Order, opts: { withToken?: boolean } = {}): PublicOrder {
     return {
+      ...(opts.withToken && order.trackingToken ? { trackingToken: order.trackingToken } : {}),
       number: order.number,
       status: order.status,
       total: order.total,
@@ -224,7 +238,15 @@ export class OrderService {
    */
   create(
     input: OrderInput,
-    opts: { by?: Actor; clientRef?: string; payment?: PaymentInput; source?: OrderSource; pickupTime?: string; customerPhone?: string } = {},
+    opts: {
+      by?: Actor;
+      clientRef?: string;
+      payment?: PaymentInput;
+      source?: OrderSource;
+      pickupTime?: string;
+      customerPhone?: string;
+      trackingToken?: string;
+    } = {},
   ): Order {
     if (opts.clientRef !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(opts.clientRef)) {
       throw new ShopError("invalid_ref", "clientRef must be 8-64 letters, digits or dashes.");
@@ -272,8 +294,8 @@ export class OrderService {
       const { lastInsertRowid } = this.db
         .prepare(
           `INSERT INTO orders (number, business_date, type, table_id, customer_name, notes, status, total, created_at, updated_at, client_ref, created_by,
-             member_id, subtotal, discount, reward_id, reward_name, points_redeemed, source, pickup_time, customer_phone)
-           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             member_id, subtotal, discount, reward_id, reward_name, points_redeemed, source, pickup_time, customer_phone, tracking_token)
+           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           next,
@@ -296,12 +318,13 @@ export class OrderService {
           opts.source ?? "till",
           opts.pickupTime ?? null,
           opts.customerPhone ?? "",
+          opts.trackingToken ?? null,
         );
       const orderId = Number(lastInsertRowid);
       const insertLine = this.db.prepare(
-        `INSERT INTO order_items (order_id, item_id, name, unit_price, quantity, note, options) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO order_items (order_id, item_id, name, unit_price, quantity, note, options, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      for (const l of lines) insertLine.run(orderId, l.itemId, l.name, l.unitPrice, l.quantity, l.note, JSON.stringify(l.options));
+      for (const l of lines) insertLine.run(orderId, l.itemId, l.name, l.unitPrice, l.quantity, l.note, JSON.stringify(l.options), l.category);
       // Spending points happens in this transaction: not enough points = no order.
       if (reward) this.loyalty!.change(memberId!, -reward.points, `Redeemed ${reward.name} on order #${next}`, { orderId, by: opts.by?.name });
       if (opts.payment) {
@@ -675,6 +698,7 @@ export class OrderService {
       source: OrderSource;
       pickup_time: string | null;
       customer_phone: string;
+      tracking_token: string | null;
     }[];
     if (!rows.length) return [];
 
@@ -701,6 +725,7 @@ export class OrderService {
       quantity: number;
       note: string;
       options: string;
+      category: string | null;
     }[];
 
     return rows.map((r) => ({
@@ -721,6 +746,7 @@ export class OrderService {
       source: r.source,
       pickupTime: r.pickup_time,
       customerPhone: r.customer_phone,
+      trackingToken: r.tracking_token,
       createdBy: r.created_by,
       createdAt: r.created_at,
       payment: {
@@ -750,6 +776,7 @@ export class OrderService {
               .map((o) => o.name)
               .join(" · "),
             lineTotal: l.unit_price * l.quantity,
+            category: l.category,
           };
         }),
     }));

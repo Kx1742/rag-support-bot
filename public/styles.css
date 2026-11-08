@@ -728,3 +728,55 @@ button {
   color: inherit;
   font-weight: 700;
 }
+
+/* Live order tracking */
+.order-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.order-steps li {
+  position: relative;
+  padding-top: 14px;
+  border-top: 4px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.order-steps li.done {
+  border-top-color: var(--brand);
+  color: var(--text);
+}
+
+.order-steps li.current {
+  border-top-color: var(--brand);
+  color: var(--brand);
+  font-weight: 800;
+}
+
+.tracking-card.is-ready {
+  border-color: #18794e;
+  box-shadow: 0 0 0 3px rgb(24 121 78 / 0.25);
+}
+
+.tracking-card.is-ready .order-steps li {
+  border-top-color: #18794e;
+}
+
+.tracking-card.is-ready .order-steps li.current {
+  color: #18794e;
+}
+
+.tracking-card.is-cancelled {
+  border-color: var(--error);
+}
+
+.order-status-text {
+  font-weight: 600;
+}

@@ -131,7 +131,8 @@
       <!-- Orders (kitchen display) -->
       <section class="panel" data-panel="orders" hidden>
         <div class="menu-bar">
-          <span class="muted">Oldest first. Timers turn amber at 5 minutes and red at 10.</span>
+          <div class="station-filter" id="station-filter" role="radiogroup" aria-label="Show items for" hidden></div>
+          <span class="muted" id="orders-hint">Oldest first. Timers turn amber at 5 minutes and red at 10.</span>
           <a class="btn btn-ghost btn-sm" id="pickup-link" href="/display" target="_blank" rel="noopener">Open pickup screen ↗</a>
         </div>
         <div class="stats" id="order-stats"></div>
