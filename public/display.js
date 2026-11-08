@@ -42,9 +42,9 @@ function render(board) {
   knownReady = new Set(board.ready);
   firstLoad = false;
 
-  $("preparing").replaceChildren(...numbers(board.preparing, [], "Nothing in the queue"));
+  $("preparing").replaceChildren(...numbers(board.preparing, [], "No orders being made right now"));
   // The server sends ready orders newest-call first.
-  $("ready").replaceChildren(...numbers(board.ready, fresh, "—"));
+  $("ready").replaceChildren(...numbers(board.ready, fresh, "Your number will appear here when it's ready"));
 }
 
 function numbers(list, fresh, emptyText) {
