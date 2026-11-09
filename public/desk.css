@@ -2645,3 +2645,111 @@ a.btn {
   font-size: 14px;
   font-style: italic;
 }
+
+/* Receipts */
+.receipt {
+  width: min(320px, 100%);
+  margin: 0 auto;
+  padding: 18px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: 14px/1.4 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+.receipt .r-head {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.receipt .r-head strong {
+  display: block;
+  font-size: 16px;
+}
+
+.receipt .r-meta {
+  padding: 8px 0;
+  border-top: 1px dashed #999;
+  border-bottom: 1px dashed #999;
+  margin-bottom: 8px;
+}
+
+.receipt .r-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.receipt .r-sub {
+  padding-left: 22px;
+  color: #555;
+  font-size: 12px;
+}
+
+.receipt .r-lines {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed #999;
+}
+
+.receipt .r-total {
+  margin: 6px 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.receipt .r-pay {
+  padding: 6px 0;
+  border-top: 1px dashed #999;
+}
+
+.receipt .r-note {
+  color: #555;
+  font-size: 12px;
+}
+
+.receipt .r-foot {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+}
+
+/* Printing: only the receipt, sized for a narrow receipt printer. */
+@media print {
+  body.printing-receipt > *:not(#receipt-dialog) {
+    display: none !important;
+  }
+  body.printing-receipt {
+    background: #fff;
+  }
+  body.printing-receipt #receipt-dialog {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: #fff;
+    box-shadow: none;
+  }
+  body.printing-receipt #receipt-dialog::backdrop {
+    background: none;
+  }
+  body.printing-receipt #receipt-dialog .sheet-body {
+    padding: 0;
+  }
+  body.printing-receipt #receipt-dialog .sheet-head,
+  body.printing-receipt #receipt-dialog .sheet-foot {
+    display: none;
+  }
+  body.printing-receipt .receipt {
+    border: none;
+    width: 72mm;
+    padding: 0;
+  }
+  @page {
+    margin: 4mm;
+  }
+}

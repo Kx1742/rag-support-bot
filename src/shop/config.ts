@@ -41,6 +41,8 @@ export interface ShopConfig {
   currency: string;
   /** How money and dates are formatted on screens, e.g. "en-US" (default). */
   locale?: string;
+  /** Printed at the top and bottom of receipts. */
+  receipt?: { address?: string; phone?: string; footer?: string };
   /** Prefix for booking references, e.g. "BB" -> "BB-7K3QX". */
   referencePrefix: string;
   /** Missing day = closed. Times are "HH:MM" in the shop's timezone. */
@@ -177,6 +179,10 @@ export function validateShopConfig(c: ShopConfig): void {
       }
       rewardIds.add(r.id);
     }
+  }
+  for (const key of ["address", "phone", "footer"] as const) {
+    const value = c.receipt?.[key];
+    if (value !== undefined && (typeof value !== "string" || value.length > 200)) fail(`receipt.${key} must be text up to 200 characters`);
   }
   const stationIds = new Set<string>();
   for (const st of c.stations ?? []) {

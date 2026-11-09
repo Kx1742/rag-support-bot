@@ -25,6 +25,8 @@ export interface DeskDeps {
   heartbeatMs?: number;
   /** Public demo: the shared demo accounts can't be changed. */
   demo?: boolean;
+  /** The business's display name, for receipts. */
+  businessName?: (tenantId: string) => Promise<string | undefined>;
 }
 
 /** Handles /api/desk/* routes. Returns false when the path isn't a desk route. */
@@ -186,6 +188,12 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
   if (req.method === "POST" && (match = /^\/orders\/(\d+)\/pay$/.exec(rest))) {
     need("payments.take");
     return ok(res, { order: shop.orders.pay(idParam(match[1]), parsePayment(await readObject(req)), actor) });
+  }
+  if (req.method === "GET" && (match = /^\/orders\/(\d+)\/receipt$/.exec(rest))) {
+    need("till.use");
+    const order = shop.orders.get(idParam(match[1]));
+    if (!order) throw new HttpError(404, "Order not found");
+    return ok(res, { receipt: shop.orders.receipt(order, (await deps.businessName?.(shop.tenantId)) ?? shop.tenantId) });
   }
   if (req.method === "POST" && (match = /^\/orders\/(\d+)\/refund$/.exec(rest))) {
     need("payments.refund");

@@ -1,0 +1,11 @@
+{
+  "name": "Café Chat",
+  "short_name": "Café",
+  "description": "Ask questions, order ahead, book a table and check your points.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f5f3",
+  "theme_color": "#8a5a3b",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

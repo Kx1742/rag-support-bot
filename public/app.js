@@ -833,6 +833,7 @@ function trackOrder(order) {
   const steps = el("ol", { class: "order-steps" });
   const headline = el("strong", {}, "✓ Order placed");
   const status = el("div", { class: "order-status-text" });
+  const pickupLine = el("div", {}, `Pickup ${order.pickupTime === "asap" ? "as soon as possible" : `at ${order.pickupTime}`} · ${money(order.total)} to pay at the counter`);
   const card = el(
     "div",
     { class: "booking-card confirmed tracking-card", "aria-live": "polite" },
@@ -840,7 +841,7 @@ function trackOrder(order) {
     el("div", { class: "ref" }, number),
     steps,
     status,
-    el("div", {}, `Pickup ${order.pickupTime === "asap" ? "as soon as possible" : `at ${order.pickupTime}`} · ${money(order.total)} to pay at the counter`),
+    pickupLine,
     ...order.items.map((i) => el("div", { class: "hint" }, `${i.quantity}× ${i.name}${i.optionsLabel ? ` · ${i.optionsLabel}` : ""}`)),
     order.memberPoints ? el("div", { class: "hint" }, `You'll earn ${tenantInfo.loyalty?.name ?? "points"} when you pay.`) : null,
   );
@@ -871,7 +872,8 @@ function trackOrder(order) {
     if (s === "completed") {
       headline.textContent = "✓ Collected. Enjoy!";
       status.textContent = "";
-      forgetOrder(order.trackingToken);
+      pickupLine.hidden = true; // the receipt below has the payment details
+      offerReceipt(card, order.trackingToken).finally(() => forgetOrder(order.trackingToken));
     }
     if (s === "cancelled") {
       headline.textContent = "Order cancelled";
@@ -890,6 +892,50 @@ function trackOrder(order) {
     show(s);
     if (s === "completed" || s === "cancelled") source.close();
   });
+}
+
+/** Adds a "View receipt" button once the order has been paid. */
+async function offerReceipt(card, token) {
+  if (!token || card.querySelector(".receipt-btn")) return;
+  try {
+    const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/orders/track?token=${encodeURIComponent(token)}`);
+    const { receipt } = await res.json();
+    if (!receipt) return;
+    const box = el("div", { class: "receipt", hidden: true }, ...receiptNodes(receipt));
+    const btn = el("button", { type: "button", class: "ghost receipt-btn" }, "View receipt");
+    btn.addEventListener("click", () => {
+      box.hidden = !box.hidden;
+      btn.textContent = box.hidden ? "View receipt" : "Hide receipt";
+    });
+    card.append(btn, box);
+  } catch {
+    /* receipt is a nice-to-have */
+  }
+}
+
+/** Receipt layout (same as the till's printed receipt). */
+function receiptNodes(r) {
+  const fmt = new Intl.NumberFormat(r.locale, { style: "currency", currency: r.currency });
+  const m = (cents) => fmt.format(cents / 100);
+  const row = (label, value, cls = "") => el("div", { class: `r-row ${cls}` }, el("span", {}, label), el("span", {}, value));
+  const num = String(r.number).padStart(3, "0");
+  const p = r.payment;
+  return [
+    el("div", { class: "r-head" }, el("strong", {}, r.business.name), r.business.address ? el("div", {}, r.business.address) : null, r.business.phone ? el("div", {}, r.business.phone) : null),
+    el("div", { class: "r-meta" }, el("div", {}, `Order #${num} · Takeaway`), el("div", {}, `${r.date} ${r.time}`)),
+    el(
+      "div",
+      { class: "r-lines" },
+      ...r.lines.map((l) => el("div", {}, row(`${l.quantity}× ${l.name}`, m(l.lineTotal)), l.optionsLabel ? el("div", { class: "r-sub" }, l.optionsLabel) : null)),
+    ),
+    row("Subtotal", m(r.subtotal)),
+    r.discount ? row(r.reward ?? "Reward", `−${m(r.discount)}`) : null,
+    row("Total", m(r.total), "r-total"),
+    p.status === "paid" ? row(`Paid by ${p.method}`, m(p.tendered ?? r.total)) : row(p.status === "refunded" ? "Refunded" : "Not paid yet", ""),
+    p.status === "paid" && p.method === "cash" && p.change ? row("Change", m(p.change)) : null,
+    r.pointsEarned ? el("div", { class: "r-note" }, `+${r.pointsEarned} loyalty points`) : null,
+    r.business.footer ? el("div", { class: "r-foot" }, r.business.footer) : null,
+  ].filter(Boolean);
 }
 
 /** Remembers tracked orders in this browser so a reload doesn't lose them. */
@@ -1021,4 +1067,9 @@ async function getJson(url) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+// Installable app + offline copy of the pages (never of /api data). Optional: ignore failures.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
 }

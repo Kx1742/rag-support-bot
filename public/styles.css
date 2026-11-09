@@ -780,3 +780,62 @@ button {
 .order-status-text {
   font-weight: 600;
 }
+
+/* Digital receipt in the chat */
+.receipt-btn {
+  justify-self: start;
+}
+
+.booking-card .receipt {
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: #111;
+  font: 13px/1.4 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+.receipt .r-head {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.receipt .r-head strong {
+  display: block;
+  font-size: 15px;
+}
+
+.receipt .r-meta,
+.receipt .r-lines {
+  padding: 6px 0;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed #999;
+}
+
+.receipt .r-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.receipt .r-sub,
+.receipt .r-note {
+  color: #555;
+  font-size: 12px;
+}
+
+.receipt .r-sub {
+  padding-left: 22px;
+}
+
+.receipt .r-total {
+  margin: 4px 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.receipt .r-foot {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 12px;
+}

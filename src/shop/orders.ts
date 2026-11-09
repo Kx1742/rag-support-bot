@@ -108,6 +108,27 @@ export interface PublicOrder {
   trackingToken?: string;
 }
 
+/** Everything printed on a receipt. Built on the server so the till and the customer see the same thing. */
+export interface Receipt {
+  business: { name: string; address: string; phone: string; footer: string };
+  currency: string;
+  locale: string;
+  number: number;
+  date: string;
+  time: string;
+  type: OrderType;
+  table: string | null;
+  customerName: string;
+  lines: { name: string; optionsLabel: string; note: string; quantity: number; unitPrice: number; lineTotal: number }[];
+  subtotal: number;
+  discount: number;
+  reward: string | null;
+  total: number;
+  payment: { status: PaymentStatus; method: PaymentMethod | null; tendered: number | null; change: number | null };
+  pointsEarned: number;
+  servedBy: string;
+}
+
 export interface OrderLineInput {
   itemId: string;
   quantity: number;
@@ -219,6 +240,38 @@ export class OrderService {
   }
 
   /** Public view of an order for the customer who placed it. */
+  /** The receipt for an order (paid or not; the payment section says which). */
+  receipt(order: Order, businessName: string): Receipt {
+    const r = this.config.receipt ?? {};
+    const time = zonedNow(this.config.timezone, new Date(order.payment.paidAt ?? order.createdAt)).minutes;
+    return {
+      business: { name: businessName, address: r.address ?? "", phone: r.phone ?? "", footer: r.footer ?? "" },
+      currency: this.config.currency,
+      locale: this.config.locale ?? "en-US",
+      number: order.number,
+      date: order.businessDate,
+      time: fromMinutes(time),
+      type: order.type,
+      table: order.tableId ? (this.config.tables.find((t) => t.id === order.tableId)?.name ?? order.tableId) : null,
+      customerName: order.customerName,
+      lines: order.items.map((l) => ({
+        name: l.name,
+        optionsLabel: l.optionsLabel,
+        note: l.note,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        lineTotal: l.lineTotal,
+      })),
+      subtotal: order.subtotal,
+      discount: order.discount,
+      reward: order.reward?.name ?? null,
+      total: order.total,
+      payment: { status: order.payment.status, method: order.payment.method, tendered: order.payment.tendered, change: order.payment.change },
+      pointsEarned: order.pointsEarned,
+      servedBy: order.payment.paidBy || order.createdBy,
+    };
+  }
+
   toPublic(order: Order, opts: { withToken?: boolean } = {}): PublicOrder {
     return {
       ...(opts.withToken && order.trackingToken ? { trackingToken: order.trackingToken } : {}),

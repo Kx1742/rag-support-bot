@@ -59,6 +59,10 @@ const STATIC_FILES: Record<string, { file: string; type: string }> = {
   "/display": { file: "display.html", type: "text/html; charset=utf-8" },
   "/display.js": { file: "display.js", type: "text/javascript; charset=utf-8" },
   "/display.css": { file: "display.css", type: "text/css; charset=utf-8" },
+  "/sw.js": { file: "sw.js", type: "text/javascript; charset=utf-8" },
+  "/icon.svg": { file: "icon.svg", type: "image/svg+xml" },
+  "/app.webmanifest": { file: "app.webmanifest", type: "application/manifest+json" },
+  "/desk.webmanifest": { file: "desk.webmanifest", type: "application/manifest+json" },
 };
 
 /** Public live streams (pickup screens) are capped so nobody can hog connections. */
@@ -143,6 +147,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       trustProxy: deps.trustProxy,
       secureCookies: deps.secureCookies,
       demo: !!deps.demo,
+      businessName: async (tenantId) => (await deps.getAssistant(tenantId))?.tenant.name,
     });
     if (handled) return;
   }
@@ -211,7 +216,9 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     if (action === "orders/track" && req.method === "GET") {
       const order = shop.orders.byTrackingToken(url.searchParams.get("token") ?? "");
       if (!order) throw new HttpError(404, "Order not found");
-      sendJson(res, 200, { order: shop.orders.toPublic(order) });
+      // A receipt once there's a payment to show (the customer pays at pickup).
+      const receipt = order.payment.status !== "unpaid" ? shop.orders.receipt(order, assistant.tenant.name) : null;
+      sendJson(res, 200, { order: shop.orders.toPublic(order), receipt });
       return;
     }
     if (action === "orders/track/events" && req.method === "GET") {

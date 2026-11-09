@@ -773,7 +773,7 @@ async function submitOrder(payment) {
     payment
       ? `Order #${pad(order.number)} paid${payment.method === "cash" && change ? ` · change ${money(change)}` : ""}${order.pointsEarned ? ` · +${order.pointsEarned} pts` : ""} · sent to the kitchen`
       : `Order #${pad(order.number)} sent to the kitchen · ${money(order.total)} unpaid`,
-    { tone: "success" },
+    { tone: "success", action: payment ? { label: "Receipt", run: () => showReceipt(order.id) } : null },
   );
   resetTicket();
   renderItems();
@@ -900,6 +900,72 @@ $("pay-form").addEventListener("submit", async (e) => {
     renderChange();
   }
 });
+
+// ---------- Receipts ----------
+
+const receiptDialog = $("receipt-dialog");
+$("receipt-close").addEventListener("click", () => receiptDialog.close());
+$("receipt-done").addEventListener("click", () => receiptDialog.close());
+$("receipt-print").addEventListener("click", () => {
+  document.body.classList.add("printing-receipt");
+  window.print();
+});
+window.addEventListener("afterprint", () => document.body.classList.remove("printing-receipt"));
+
+async function showReceipt(orderId) {
+  try {
+    const { receipt } = await api(`/orders/${orderId}/receipt`);
+    $("receipt-title").textContent = `Receipt · #${pad(receipt.number)}`;
+    $("receipt-body").replaceChildren(...receiptNodes(receipt));
+    receiptDialog.showModal();
+  } catch (err) {
+    toast(err.message, { tone: "error" });
+  }
+}
+
+/** The receipt as plain DOM nodes (same layout as the customer's digital receipt). */
+function receiptNodes(r) {
+  const fmt = new Intl.NumberFormat(r.locale, { style: "currency", currency: r.currency });
+  const m = (cents) => fmt.format(cents / 100);
+  const row = (label, value, cls = "") => h("div", { class: `r-row ${cls}` }, h("span", {}, label), h("span", {}, value));
+  const p = r.payment;
+  return [
+    h("div", { class: "r-head" }, h("strong", {}, r.business.name), r.business.address ? h("div", {}, r.business.address) : null, r.business.phone ? h("div", {}, r.business.phone) : null),
+    h(
+      "div",
+      { class: "r-meta" },
+      h("div", {}, `Order #${pad(r.number)} · ${r.table ? r.table : r.type === "dine_in" ? "Dine in" : "Takeaway"}`),
+      h("div", {}, `${r.date} ${r.time}${r.customerName ? ` · ${r.customerName}` : ""}`),
+    ),
+    h(
+      "div",
+      { class: "r-lines" },
+      ...r.lines.map((l) =>
+        h(
+          "div",
+          { class: "r-line" },
+          row(`${l.quantity}× ${l.name}`, m(l.lineTotal)),
+          l.optionsLabel ? h("div", { class: "r-sub" }, l.optionsLabel) : null,
+          l.quantity > 1 ? h("div", { class: "r-sub" }, `${m(l.unitPrice)} each`) : null,
+        ),
+      ),
+    ),
+    row("Subtotal", m(r.subtotal)),
+    r.discount ? row(r.reward ?? "Reward", `−${m(r.discount)}`) : null,
+    row("Total", m(r.total), "r-total"),
+    p.status === "paid"
+      ? h(
+          "div",
+          { class: "r-pay" },
+          row(`Paid by ${p.method}`, m(p.tendered ?? r.total)),
+          p.method === "cash" && p.change ? row("Change", m(p.change)) : null,
+        )
+      : h("div", { class: "r-pay" }, row(p.status === "refunded" ? "Refunded" : "Not paid yet", p.status === "refunded" ? m(r.total) : "")),
+    r.pointsEarned ? h("div", { class: "r-note" }, `+${r.pointsEarned} loyalty points`) : null,
+    r.servedBy ? h("div", { class: "r-note" }, `Served by ${r.servedBy}`) : null,
+    r.business.footer ? h("div", { class: "r-foot" }, r.business.footer) : null,
+  ].filter(Boolean);
+}
 
 // ---------- Loyalty at the till ----------
 
@@ -1192,6 +1258,9 @@ function orderCard(o, isNew) {
   }
   if (active && o.payment.status === "unpaid" && can("orders.manage")) {
     actions.push(armButton("Cancel", `order-cancel-${o.id}`, () => setOrderStatus(o, "cancelled")));
+  }
+  if (o.payment.status !== "unpaid" && can("till.use")) {
+    actions.push(h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => showReceipt(o.id) }, "Receipt"));
   }
   if (o.payment.status === "paid" && can("payments.refund")) {
     actions.push(h("button", { type: "button", class: "btn btn-danger btn-sm", onclick: () => openRefund(o) }, "Refund"));
@@ -2206,4 +2275,9 @@ function writePref(key, value) {
   } catch {
     /* storage blocked: preference lasts this visit only */
   }
+}
+
+// Installable app + offline copy of the pages (never of /api data). Optional: ignore failures.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
 }

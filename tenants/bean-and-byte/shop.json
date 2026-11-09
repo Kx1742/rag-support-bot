@@ -2,6 +2,11 @@
   "timezone": "America/New_York",
   "currency": "USD",
   "locale": "en-US",
+  "receipt": {
+    "address": "42 Circuit Lane, Maple District (fictional)",
+    "phone": "(555) 010-2040",
+    "footer": "Thanks for visiting! Join Byte Points: 1 point per $1."
+  },
   "referencePrefix": "BB",
   "openingHours": {
     "mon": [

@@ -1,0 +1,12 @@
+{
+  "name": "Shop Desk",
+  "short_name": "Desk",
+  "description": "Till, kitchen display, bookings and menu for the café staff.",
+  "start_url": "/desk",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2b1d14",
+  "theme_color": "#2b1d14",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

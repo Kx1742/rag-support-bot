@@ -45,7 +45,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - **Order ahead**: pick items and drink options, choose a pickup time, pay at the counter; the order
   appears on the kitchen screen and the pickup screen
 - **Live order tracking**: the confirmation card follows the order (Received → Being made → Ready to
-  collect) and chimes when it's ready; it survives a page reload and uses a private per-order link
+  collect) and chimes when it's ready; it survives a page reload and uses a private per-order link;
+  once collected and paid it offers a **digital receipt**
 - **My booking**: look up or cancel your own booking with its reference + phone number
 - **My points**: check a loyalty balance and rewards by phone number
 - **Knows what's sold out**: with Gemini it reads the live menu (prices, sold out, "only 3 left");
@@ -55,6 +56,7 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Big "Preparing" and "Ready to collect" order numbers, updated live, newest call first, with a chime
 - Shows order numbers only: no names or items
 - Follow-up questions, suggested questions, business branding, dark mode, works on phones
+- **Installable app (PWA)**: add the desk or the chat to a tablet/phone home screen; pages still open on flaky Wi-Fi (live data is never cached)
 
 **Staff desk** (`/desk`, each person logs in with their own username + PIN)
 - **Till / POS**: menu grid by category, item search, **drink options** (size, milk, extra shot, iced...)
@@ -74,6 +76,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - **Online orders** show on the kitchen screen with an Online label, pickup time and tap-to-call phone
 - **Bar / Kitchen screens**: each kitchen display can show just its station's items (set in `shop.json`),
   so the barista sees drinks and the kitchen sees food; each device remembers its choice
+- **Receipts**: printable receipt for any paid order (also offered right after charging); printing
+  outputs just the receipt, sized for a 72 mm receipt printer; café address/phone/footer from `shop.json`
 - **Refunds** (managers): with a reason; paid orders can't simply be cancelled
 - **End-of-day report** (managers): sales, cash vs card, unpaid, refunds, best sellers, sales by hour, CSV export
 - **Staff accounts** (managers): add people, change roles, reset PINs, deactivate
@@ -87,7 +91,7 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
-- 146 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 152 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 
 ## How it works
 
@@ -182,6 +186,8 @@ them. Unexpected errors are not.
 | `VACUUM INTO` for backups | A consistent snapshot while the app keeps running, with no extra tools. |
 | Money formatted in the shop's locale, not the browser's | A US café shows "$4.75" on every till, not "US$4.75" on a till set to another region. |
 | Request logs keep the path only | Query strings can contain phone numbers; logs shouldn't. |
+| One receipt builder on the server for the till and the customer | Printed and digital receipts can't disagree. |
+| Service worker caches pages only, network-first, never `/api/` | Staff always see live orders and payments; only the page shell survives a dropped connection. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
 ## Getting started
@@ -206,7 +212,7 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 146 tests
+npm test                      # 152 tests
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
@@ -281,6 +287,7 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 | `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue; POST takes `items[].options`, `clientRef`, optional `payment` |
 | `POST` | `/api/desk/orders/:id/pay`, `/api/desk/orders/:id/refund` | Take payment `{ method, tendered? }`; refund `{ reason }` (manager) |
 | `GET` | `/api/desk/report?date=` | End-of-day report (manager) |
+| `GET` | `/api/desk/orders/:id/receipt` | Receipt data for printing |
 | `GET`, `POST` | `/api/desk/loyalty?phone=`, `/api/desk/loyalty` | Look up or join a member; orders take `memberId` and `rewardId` |
 | `GET`, `POST`, `PATCH` | `/api/desk/staff`, `/api/desk/staff/:id` | Staff accounts (manager) |
 | `GET`, `POST`, `PATCH` | `/api/desk/bookings`, `/api/desk/bookings/:id` | Bookings by day, status changes |
