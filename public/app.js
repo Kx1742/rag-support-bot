@@ -17,7 +17,12 @@ let tenantInfo = null;
 let history = [];
 let busy = false;
 
-init().catch((err) => showError(`Could not load the chat: ${err.message}`));
+// Language switcher (translations live in i18n.js).
+const langSelect = $("lang-select");
+langSelect.append(...Object.entries(LANGUAGES).map(([code, label]) => el("option", { value: code, selected: code === lang }, label)));
+langSelect.addEventListener("change", () => setLanguage(langSelect.value));
+
+init().catch((err) => showError(t("loadFailed", { error: err.message })));
 
 async function init() {
   const config = await getJson("/api/config");
@@ -27,10 +32,10 @@ async function init() {
     const strip = $("demo-strip");
     strip.hidden = false;
     strip.append(
-      "Public demo · ",
-      el("a", { href: `/desk?tenant=${encodeURIComponent(tenantId)}` }, "Open the staff desk"),
-      " (one-tap demo logins) · ",
-      el("a", { href: `/display?tenant=${encodeURIComponent(tenantId)}`, target: "_blank", rel: "noopener" }, "Pickup screen"),
+      t("demoStrip"),
+      el("a", { href: `/desk?tenant=${encodeURIComponent(tenantId)}` }, t("openDesk")),
+      t("demoLogins"),
+      el("a", { href: `/display?tenant=${encodeURIComponent(tenantId)}`, target: "_blank", rel: "noopener" }, t("pickupScreen")),
     );
   }
   const tenant = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}`);
@@ -38,8 +43,8 @@ async function init() {
   document.title = `${tenant.name} · Support`;
   $("business-name").textContent = tenant.name;
   $("avatar").textContent = tenant.name.trim().charAt(0).toUpperCase();
-  $("assistant-line").textContent = `${tenant.assistantName} · AI assistant`;
-  $("welcome-title").textContent = `Hi, I'm ${tenant.assistantName}! How can I help?`;
+  $("assistant-line").textContent = t("assistantLine", { name: tenant.assistantName });
+  $("welcome-title").textContent = t("welcome", { name: tenant.assistantName });
   $("fictional-badge").hidden = !tenant.fictional;
   $("mode-badge").hidden = config.mode !== "offline";
   if (tenant.brandColor) document.documentElement.style.setProperty("--brand", tenant.brandColor);
@@ -57,7 +62,7 @@ async function init() {
   }
   $("quick-actions").hidden = !actions.some(([, enabled]) => enabled);
   if (tenant.orderAhead) restoreTrackedOrders();
-  if (tenant.loyalty) $("points-btn").lastChild.textContent = ` My ${tenant.loyalty.name}`;
+  if (tenant.loyalty) $("points-label").textContent = t("myPoints", { program: tenant.loyalty.name });
 
   for (const question of tenant.suggestedQuestions) {
     const button = document.createElement("button");
@@ -116,7 +121,7 @@ async function sendMessage(raw) {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `Request failed (${res.status})`);
+      throw new Error(data.error || t("requestFailed", { status: res.status }));
     }
 
     for await (const { event, data } of readSse(res.body)) {
@@ -128,14 +133,14 @@ async function sendMessage(raw) {
       } else if (event === "error") throw new Error(data.error);
       scrollToBottom();
     }
-    if (!answer) throw new Error("No answer received");
+    if (!answer) throw new Error(t("noAnswer"));
     renderSources(bot, citedSources(answer, sources));
     history.push({ role: "user", text: message }, { role: "assistant", text: answer });
     history = history.slice(-10);
   } catch (err) {
     failed = true;
     bot.root.classList.add("error");
-    bot.body.textContent = err.message || "Something went wrong.";
+    bot.body.textContent = err.message || t("somethingWrong");
   } finally {
     setBusy(false);
     scrollToBottom();
@@ -183,7 +188,7 @@ function addBotBubble() {
   const body = document.createElement("div");
   const typing = document.createElement("div");
   typing.className = "typing";
-  typing.setAttribute("aria-label", "Assistant is typing");
+  typing.setAttribute("aria-label", t("typing"));
   typing.append(...[0, 1, 2].map(() => document.createElement("span")));
   body.append(typing);
   root.append(body);
@@ -261,7 +266,7 @@ function renderSources(bot, sources) {
   const details = document.createElement("details");
   details.className = "sources";
   const summary = document.createElement("summary");
-  summary.textContent = `Sources (${sources.length})`;
+  summary.textContent = t("sources", { n: sources.length });
   const ol = document.createElement("ol");
 
   for (const s of sources) {
@@ -314,7 +319,7 @@ function showAction(action) {
   if (action.name === "booking_created") addBookingConfirmation(action.data);
   if (action.name === "booking_cancelled") {
     const b = action.data;
-    addCard(el("div", { class: "booking-card cancelled" }, el("strong", {}, "Booking cancelled"), el("div", {}, `${b.reference} · ${b.dateText} at ${b.time}`)));
+    addCard(el("div", { class: "booking-card cancelled" }, el("strong", {}, t("bookingCancelled")), el("div", {}, t("refAt", { ref: b.reference, date: b.dateText, time: b.time }))));
   }
 }
 
@@ -329,16 +334,16 @@ function addBookingConfirmation(b) {
     el(
       "div",
       { class: "booking-card confirmed" },
-      el("strong", {}, "✓ Table booked"),
+      el("strong", {}, t("tableBooked")),
       el("div", { class: "ref" }, b.reference),
-      el("div", {}, `${b.dateText} at ${b.time}`),
-      el("div", {}, `${b.partySize} ${b.partySize === 1 ? "person" : "people"} · ${b.name}`),
+      el("div", {}, t("dateAt", { date: b.dateText, time: b.time })),
+      el("div", {}, `${peopleLabel(b.partySize)} · ${b.name}`),
       el(
         "div",
         { class: "hint" },
         tenantInfo?.chatBookings
-          ? "Keep your reference. To cancel, tell me the reference and your phone number."
-          : "Keep your reference. To cancel, contact the café with your reference.",
+          ? t("keepRefChat")
+          : t("keepRefCall"),
       ),
     ),
   );
@@ -353,25 +358,25 @@ function openBookingCard() {
   const party = el(
     "select",
     {},
-    ...Array.from({ length: info.maxPartySize }, (_, i) => el("option", { value: String(i + 1), selected: i === 1 }, `${i + 1} ${i ? "people" : "person"}`)),
+    ...Array.from({ length: info.maxPartySize }, (_, i) => el("option", { value: String(i + 1), selected: i === 1 }, peopleLabel(i + 1))),
   );
   const times = el("div", { class: "times" });
   const name = el("input", { maxlength: "80", autocomplete: "name", required: true });
   const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
-  const notes = el("input", { maxlength: "300", placeholder: "Optional, e.g. high chair" });
+  const notes = el("input", { maxlength: "300", placeholder: t("notesPlaceholder") });
   const error = el("p", { class: "form-error", role: "alert" });
-  const submit = el("button", { type: "submit", class: "primary", disabled: true }, "Book table");
-  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  const submit = el("button", { type: "submit", class: "primary", disabled: true }, t("bookBtn"));
+  const close = el("button", { type: "button", class: "ghost" }, t("close"));
 
   const form = el(
     "form",
     { class: "booking-card form" },
-    el("strong", {}, "Book a table"),
-    el("div", { class: "row" }, el("label", {}, "Date", date), el("label", {}, "People", party)),
-    el("div", { class: "label" }, "Time"),
+    el("strong", {}, t("bookTable")),
+    el("div", { class: "row" }, el("label", {}, t("date"), date), el("label", {}, t("people"), party)),
+    el("div", { class: "label" }, t("time")),
     times,
-    el("div", { class: "row" }, el("label", {}, "Name", name), el("label", {}, "Phone", phone)),
-    el("label", {}, "Notes", notes),
+    el("div", { class: "row" }, el("label", {}, t("name"), name), el("label", {}, t("phone"), phone)),
+    el("label", {}, t("notes"), notes),
     error,
     el("div", { class: "actions" }, close, submit),
   );
@@ -379,7 +384,7 @@ function openBookingCard() {
   async function loadTimes() {
     chosenTime = null;
     submit.disabled = true;
-    times.replaceChildren(el("span", { class: "hint" }, "Checking…"));
+    times.replaceChildren(el("span", { class: "hint" }, t("checking")));
     try {
       const data = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}/availability?date=${date.value}&partySize=${party.value}`);
       times.replaceChildren(
@@ -399,7 +404,7 @@ function openBookingCard() {
                 t,
               ),
             )
-          : [el("span", { class: "hint" }, data.reason || "No free times that day.")]),
+          : [el("span", { class: "hint" }, data.reason || t("noTimes"))]),
       );
     } catch (err) {
       times.replaceChildren(el("span", { class: "hint" }, err.message));
@@ -427,7 +432,7 @@ function openBookingCard() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Booking failed (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t("bookingFailed", { status: res.status }));
       form.remove();
       addBookingConfirmation(data.booking);
     } catch (err) {
@@ -447,15 +452,15 @@ function openManageCard() {
   const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
   const error = el("p", { class: "form-error", role: "alert" });
   const result = el("div", { class: "booking-result" });
-  const find = el("button", { type: "submit", class: "primary" }, "Find booking");
-  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  const find = el("button", { type: "submit", class: "primary" }, t("findBooking"));
+  const close = el("button", { type: "button", class: "ghost" }, t("close"));
 
   const form = el(
     "form",
     { class: "booking-card form" },
-    el("strong", {}, "Your booking"),
-    el("div", { class: "hint" }, "Enter the reference from your confirmation and the phone number you booked with."),
-    el("div", { class: "row" }, el("label", {}, "Reference", reference), el("label", {}, "Phone", phone)),
+    el("strong", {}, t("yourBooking")),
+    el("div", { class: "hint" }, t("lookupHint")),
+    el("div", { class: "row" }, el("label", {}, t("reference"), reference), el("label", {}, t("phone"), phone)),
     error,
     result,
     el("div", { class: "actions" }, close, find),
@@ -468,21 +473,20 @@ function openManageCard() {
       body: JSON.stringify({ reference: reference.value.trim(), phone: phone.value }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    if (!res.ok) throw new Error(data.error || t("requestFailed", { status: res.status }));
     return data.booking;
   };
 
-  const STATUS = { confirmed: "Confirmed", seated: "Seated", completed: "Finished", cancelled: "Cancelled", no_show: "Missed" };
   const show = (b) => {
-    const cancel = el("button", { type: "button", class: "ghost danger" }, "Cancel this booking");
+    const cancel = el("button", { type: "button", class: "ghost danger" }, t("cancelBooking"));
     let armed = false;
     cancel.addEventListener("click", async () => {
       if (!armed) {
         armed = true;
-        cancel.textContent = "Tap again to cancel";
+        cancel.textContent = t("tapAgainCancel");
         setTimeout(() => {
           armed = false;
-          cancel.textContent = "Cancel this booking";
+          cancel.textContent = t("cancelBooking");
         }, 3000);
         return;
       }
@@ -499,9 +503,9 @@ function openManageCard() {
         "div",
         { class: `booking-summary ${b.status}` },
         el("div", { class: "ref" }, b.reference),
-        el("div", {}, `${b.dateText} at ${b.time}`),
-        el("div", {}, `${b.partySize} ${b.partySize === 1 ? "person" : "people"} · ${b.name}`),
-        el("div", { class: "status" }, STATUS[b.status] ?? b.status),
+        el("div", {}, t("dateAt", { date: b.dateText, time: b.time })),
+        el("div", {}, `${peopleLabel(b.partySize)} · ${b.name}`),
+        el("div", { class: "status" }, t(`status_${b.status}`)),
         b.status === "confirmed" ? cancel : null,
       ),
     );
@@ -534,11 +538,11 @@ async function openOrderCard() {
   try {
     data = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}/menu`);
   } catch (err) {
-    addCard(el("div", { class: "booking-card" }, el("strong", {}, "Order ahead"), el("div", { class: "hint" }, err.message)));
+    addCard(el("div", { class: "booking-card" }, el("strong", {}, t("orderAhead")), el("div", { class: "hint" }, err.message)));
     return;
   }
   if (!data.ordering.open) {
-    addCard(el("div", { class: "booking-card" }, el("strong", {}, "Order ahead"), el("div", { class: "hint" }, data.ordering.reason)));
+    addCard(el("div", { class: "booking-card" }, el("strong", {}, t("orderAhead")), el("div", { class: "hint" }, data.ordering.reason)));
     return;
   }
 
@@ -570,28 +574,28 @@ async function openOrderCard() {
   const cartBox = el("div", { class: "order-cart" });
   const pickup = el(
     "select",
-    { "aria-label": "Pickup time" },
-    el("option", { value: "asap" }, "As soon as possible"),
+    { "aria-label": t("pickupTime") },
+    el("option", { value: "asap" }, t("asap")),
     ...data.ordering.slots.map((t) => el("option", { value: t }, t)),
   );
   const name = el("input", { maxlength: "60", autocomplete: "name", required: true });
   const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
-  const notes = el("input", { maxlength: "300", placeholder: "Optional" });
+  const notes = el("input", { maxlength: "300", placeholder: t("optional") });
   const error = el("p", { class: "form-error", role: "alert" });
-  const submit = el("button", { type: "submit", class: "primary", disabled: true }, "Place order");
-  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  const submit = el("button", { type: "submit", class: "primary", disabled: true }, t("placeOrder"));
+  const close = el("button", { type: "button", class: "ghost" }, t("close"));
   const clientRef = crypto.randomUUID();
 
   const form = el(
     "form",
     { class: "booking-card form order-card" },
-    el("strong", {}, "Order ahead"),
-    el("div", { class: "hint" }, "Pick up at the counter and pay there by cash or card."),
+    el("strong", {}, t("orderAhead")),
+    el("div", { class: "hint" }, t("orderAheadHint")),
     tabs,
     list,
     cartBox,
-    el("div", { class: "row" }, el("label", {}, "Pickup", pickup), el("label", {}, "Name", name)),
-    el("div", { class: "row" }, el("label", {}, "Phone", phone), el("label", {}, "Notes", notes)),
+    el("div", { class: "row" }, el("label", {}, t("pickup"), pickup), el("label", {}, t("name"), name)),
+    el("div", { class: "row" }, el("label", {}, t("phone"), phone), el("label", {}, t("notes"), notes)),
     error,
     el("div", { class: "actions" }, close, submit),
   );
@@ -625,13 +629,13 @@ async function openOrderCard() {
           const row = el(
             "div",
             { class: "order-row" },
-            el("div", {}, el("div", { class: "order-name" }, item.name), el("div", { class: "hint" }, item.options.length ? `from ${money(item.price)}` : money(item.price), item.lowStock ? ` · only ${item.lowStock} left` : "")),
+            el("div", {}, el("div", { class: "order-name" }, item.name), el("div", { class: "hint" }, item.options.length ? t("fromPrice", { price: money(item.price) }) : money(item.price), item.lowStock ? t("onlyLeft", { n: item.lowStock }) : "")),
             el(
               "button",
               {
                 type: "button",
                 class: "add-btn",
-                "aria-label": `Add ${item.name}`,
+                "aria-label": t("addItem", { name: item.name }),
                 onclick: () => {
                   if (item.options.length) {
                     picking = picking?.id === item.id ? null : { id: item.id, options: {} };
@@ -678,7 +682,7 @@ async function openOrderCard() {
             }),
           );
         }),
-        el("button", { type: "button", class: "primary", onclick: () => addToCart(item, { ...opts }) }, `Add · ${money(priceOf(item, opts))}`),
+        el("button", { type: "button", class: "primary", onclick: () => addToCart(item, { ...opts }) }, t("addTotal", { total: money(priceOf(item, opts)) })),
       );
     };
     draw();
@@ -710,7 +714,7 @@ async function openOrderCard() {
                 {
                   type: "button",
                   class: "ghost small-btn",
-                  "aria-label": `Remove one ${l.item.name}`,
+                  "aria-label": t("removeOne", { name: l.item.name }),
                   onclick: () => {
                     l.qty -= 1;
                     if (!l.qty) cart.splice(cart.indexOf(l), 1);
@@ -721,10 +725,10 @@ async function openOrderCard() {
               ),
             ),
           )
-        : [el("div", { class: "hint" }, "Your order is empty. Tap + to add items.")]),
+        : [el("div", { class: "hint" }, t("cartEmpty"))]),
     );
     submit.disabled = cart.length === 0;
-    submit.textContent = cart.length ? `Place order · ${money(total)}` : "Place order";
+    submit.textContent = cart.length ? t("placeOrderTotal", { total: money(total) }) : t("placeOrder");
   }
 
   close.addEventListener("click", () => form.remove());
@@ -746,7 +750,7 @@ async function openOrderCard() {
         }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || `Order failed (${res.status})`);
+      if (!res.ok) throw new Error(out.error || t("orderFailed", { status: res.status }));
       form.remove();
       unlockSound(); // the customer just tapped, so the "ready" chime is allowed later
       rememberOrder(out.order.trackingToken);
@@ -766,17 +770,17 @@ async function openOrderCard() {
 // ---------- Loyalty balance ----------
 
 function openPointsCard() {
-  const program = tenantInfo.loyalty?.name ?? "Points";
-  const phone = el("input", { type: "tel", autocomplete: "tel", required: true, placeholder: "The number you joined with" });
+  const program = tenantInfo.loyalty?.name ?? t("points");
+  const phone = el("input", { type: "tel", autocomplete: "tel", required: true, placeholder: t("joinedNumber") });
   const error = el("p", { class: "form-error", role: "alert" });
   const result = el("div");
-  const find = el("button", { type: "submit", class: "primary" }, "Check");
-  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  const find = el("button", { type: "submit", class: "primary" }, t("check"));
+  const close = el("button", { type: "button", class: "ghost" }, t("close"));
   const form = el(
     "form",
     { class: "booking-card form" },
-    el("strong", {}, `My ${program}`),
-    el("label", {}, "Phone", phone),
+    el("strong", {}, t("myPoints", { program })),
+    el("label", {}, t("phone"), phone),
     error,
     result,
     el("div", { class: "actions" }, close, find),
@@ -793,15 +797,15 @@ function openPointsCard() {
         body: JSON.stringify({ phone: phone.value }),
       });
       const s = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(s.error || `Request failed (${res.status})`);
+      if (!res.ok) throw new Error(s.error || t("requestFailed", { status: res.status }));
       result.replaceChildren(
         el(
           "div",
           { class: "booking-summary" },
-          el("div", { class: "ref" }, `${s.points} points`),
-          s.nextReward ? el("div", {}, `${s.nextReward.pointsNeeded} more for ${s.nextReward.name}`) : el("div", {}, "You can use any reward!"),
-          ...s.rewards.map((r) => el("div", { class: r.affordable ? "status" : "hint" }, `${r.affordable ? "✓" : "·"} ${r.name} (${r.points} pts)`)),
-          el("div", { class: "hint" }, "Show your phone number at the counter to use a reward."),
+          el("div", { class: "ref" }, t("pointsCount", { n: s.points })),
+          s.nextReward ? el("div", {}, t("moreFor", { n: s.nextReward.pointsNeeded, reward: s.nextReward.name })) : el("div", {}, t("anyReward")),
+          ...s.rewards.map((r) => el("div", { class: r.affordable ? "status" : "hint" }, `${r.affordable ? "✓" : "·"} ${r.name} (${t("pts", { n: r.points })})`)),
+          el("div", { class: "hint" }, t("showPhone")),
         ),
       );
     } catch (err) {
@@ -818,9 +822,9 @@ function openPointsCard() {
 // ---------- Live order tracking ----------
 
 const ORDER_STEPS = [
-  { status: "new", label: "Received" },
-  { status: "preparing", label: "Being made" },
-  { status: "ready", label: "Ready to collect" },
+  { status: "new", label: t("received") },
+  { status: "preparing", label: t("beingMade") },
+  { status: "ready", label: t("readyToCollect") },
 ];
 
 /**
@@ -831,9 +835,9 @@ function trackOrder(order) {
   const number = `#${String(order.number).padStart(3, "0")}`;
   const money = (cents) => `$${(cents / 100).toFixed(2)}`;
   const steps = el("ol", { class: "order-steps" });
-  const headline = el("strong", {}, "✓ Order placed");
+  const headline = el("strong", {}, t("orderPlaced"));
   const status = el("div", { class: "order-status-text" });
-  const pickupLine = el("div", {}, `Pickup ${order.pickupTime === "asap" ? "as soon as possible" : `at ${order.pickupTime}`} · ${money(order.total)} to pay at the counter`);
+  const pickupLine = el("div", {}, order.pickupTime === "asap" ? t("pickupAsap", { total: money(order.total) }) : t("pickupAt", { time: order.pickupTime, total: money(order.total) }));
   const card = el(
     "div",
     { class: "booking-card confirmed tracking-card", "aria-live": "polite" },
@@ -843,7 +847,7 @@ function trackOrder(order) {
     status,
     pickupLine,
     ...order.items.map((i) => el("div", { class: "hint" }, `${i.quantity}× ${i.name}${i.optionsLabel ? ` · ${i.optionsLabel}` : ""}`)),
-    order.memberPoints ? el("div", { class: "hint" }, `You'll earn ${tenantInfo.loyalty?.name ?? "points"} when you pay.`) : null,
+    order.memberPoints ? el("div", { class: "hint" }, t("earnWhenPay", { program: tenantInfo.loyalty?.name ?? t("points") })) : null,
   );
 
   let last = null;
@@ -859,25 +863,25 @@ function trackOrder(order) {
     );
     card.classList.toggle("is-ready", s === "ready");
     card.classList.toggle("is-cancelled", s === "cancelled");
-    if (s === "new") status.textContent = "We've got your order. We'll start on it shortly.";
-    if (s === "preparing") status.textContent = "We're making your order now.";
+    if (s === "new") status.textContent = t("statusNew");
+    if (s === "preparing") status.textContent = t("statusPreparing");
     if (s === "ready") {
-      headline.textContent = "🔔 Your order is ready!";
-      status.textContent = `Collect ${number} at the counter.`;
+      headline.textContent = t("orderReady");
+      status.textContent = t("collectAt", { number });
       if (!firstUpdate) {
         chime();
-        flashTitle(`Ready: ${number}`);
+        flashTitle(t("readyTitle", { number }));
       }
     }
     if (s === "completed") {
-      headline.textContent = "✓ Collected. Enjoy!";
+      headline.textContent = t("collected");
       status.textContent = "";
       pickupLine.hidden = true; // the receipt below has the payment details
       offerReceipt(card, order.trackingToken).finally(() => forgetOrder(order.trackingToken));
     }
     if (s === "cancelled") {
-      headline.textContent = "Order cancelled";
-      status.textContent = "This order was cancelled. Please contact the café if that's unexpected.";
+      headline.textContent = t("orderCancelled");
+      status.textContent = t("orderCancelledText");
       forgetOrder(order.trackingToken);
     }
   };
@@ -902,10 +906,10 @@ async function offerReceipt(card, token) {
     const { receipt } = await res.json();
     if (!receipt) return;
     const box = el("div", { class: "receipt", hidden: true }, ...receiptNodes(receipt));
-    const btn = el("button", { type: "button", class: "ghost receipt-btn" }, "View receipt");
+    const btn = el("button", { type: "button", class: "ghost receipt-btn" }, t("viewReceipt"));
     btn.addEventListener("click", () => {
       box.hidden = !box.hidden;
-      btn.textContent = box.hidden ? "View receipt" : "Hide receipt";
+      btn.textContent = box.hidden ? t("viewReceipt") : t("hideReceipt");
     });
     card.append(btn, box);
   } catch {
@@ -922,18 +926,18 @@ function receiptNodes(r) {
   const p = r.payment;
   return [
     el("div", { class: "r-head" }, el("strong", {}, r.business.name), r.business.address ? el("div", {}, r.business.address) : null, r.business.phone ? el("div", {}, r.business.phone) : null),
-    el("div", { class: "r-meta" }, el("div", {}, `Order #${num} · Takeaway`), el("div", {}, `${r.date} ${r.time}`)),
+    el("div", { class: "r-meta" }, el("div", {}, t("orderTakeaway", { n: num })), el("div", {}, `${r.date} ${r.time}`)),
     el(
       "div",
       { class: "r-lines" },
       ...r.lines.map((l) => el("div", {}, row(`${l.quantity}× ${l.name}`, m(l.lineTotal)), l.optionsLabel ? el("div", { class: "r-sub" }, l.optionsLabel) : null)),
     ),
-    row("Subtotal", m(r.subtotal)),
-    r.discount ? row(r.reward ?? "Reward", `−${m(r.discount)}`) : null,
-    row("Total", m(r.total), "r-total"),
-    p.status === "paid" ? row(`Paid by ${p.method}`, m(p.tendered ?? r.total)) : row(p.status === "refunded" ? "Refunded" : "Not paid yet", ""),
-    p.status === "paid" && p.method === "cash" && p.change ? row("Change", m(p.change)) : null,
-    r.pointsEarned ? el("div", { class: "r-note" }, `+${r.pointsEarned} loyalty points`) : null,
+    row(t("subtotal"), m(r.subtotal)),
+    r.discount ? row(r.reward ?? t("reward"), `−${m(r.discount)}`) : null,
+    row(t("total"), m(r.total), "r-total"),
+    p.status === "paid" ? row(t("paidBy", { method: t(`method_${p.method}`) }), m(p.tendered ?? r.total)) : row(p.status === "refunded" ? t("refunded") : t("notPaid"), ""),
+    p.status === "paid" && p.method === "cash" && p.change ? row(t("change"), m(p.change)) : null,
+    r.pointsEarned ? el("div", { class: "r-note" }, t("loyaltyPoints", { n: r.pointsEarned })) : null,
     r.business.footer ? el("div", { class: "r-foot" }, r.business.footer) : null,
   ].filter(Boolean);
 }
@@ -998,11 +1002,11 @@ function unlockSound() {
 
 function chime() {
   if (!audioCtx || audioCtx.state !== "running") return;
-  const t = audioCtx.currentTime;
+  const at0 = audioCtx.currentTime;
   [660, 880, 1100].forEach((freq, i) => {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    const at = t + i * 0.18;
+    const at = at0 + i * 0.18;
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.0001, at);
     gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
@@ -1065,7 +1069,7 @@ function scrollToBottom() {
 async function getJson(url) {
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new Error(data.error || t("requestFailed", { status: res.status }));
   return data;
 }
 

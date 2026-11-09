@@ -49,12 +49,15 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
   once collected and paid it offers a **digital receipt**
 - **My booking**: look up or cancel your own booking with its reference + phone number
 - **My points**: check a loyalty balance and rewards by phone number
+- **English, 中文 and Bahasa Melayu**: picked from the customer's browser, switchable in the header and
+  remembered; the AI replies in whatever language the customer writes in
 - **Knows what's sold out**: with Gemini it reads the live menu (prices, sold out, "only 3 left");
   offline it adds a "Heads up: … is sold out today" notice
 
 **Pickup screen** (`/display`, for a TV at the counter)
 - Big "Preparing" and "Ready to collect" order numbers, updated live, newest call first, with a chime
 - Shows order numbers only: no names or items
+- Language set in its link, e.g. `/display?lang=zh` or `?lang=ms`
 - Follow-up questions, suggested questions, business branding, dark mode, works on phones
 - **Installable app (PWA)**: add the desk or the chat to a tablet/phone home screen; pages still open on flaky Wi-Fi (live data is never cached)
 
@@ -92,7 +95,7 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
 - 152 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
-- 10 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, phone layout); they run on every push, with failure screenshots saved
+- 11 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, switching language, phone layout); they run on every push, with failure screenshots saved
 
 ## How it works
 
@@ -190,6 +193,7 @@ them. Unexpected errors are not.
 | One receipt builder on the server for the till and the customer | Printed and digital receipts can't disagree. |
 | E2E tests run their own server on a test copy of the café that is open all day, at local midday | Results don't depend on what time CI happens to run. |
 | Service worker caches pages only, network-first, never `/api/` | Staff always see live orders and payments; only the page shell survives a dropped connection. |
+| Customer pages translated in the browser from one small file; café content left as written | Adding a language is one dictionary; menus and documents stay exactly as the café wrote them. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
 ## Getting started
@@ -215,7 +219,7 @@ Other commands:
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
 npm test                      # 152 unit and API tests
-npm run e2e                   # 10 browser tests (needs Edge or Chrome)
+npm run e2e                   # 11 browser tests (needs Edge or Chrome)
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
@@ -311,6 +315,7 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 - [x] Loyalty points and order ahead
 - [x] Deploy-ready: public demo mode, Dockerfile, Render blueprint, backups
 - [x] Screenshots in this README
+- [x] Customer chat and pickup screen in English, 中文 and Bahasa Melayu
 - [ ] Put the live demo URL in this README
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 

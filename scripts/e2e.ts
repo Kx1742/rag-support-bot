@@ -219,6 +219,28 @@ try {
     assert(status === 403, `report API should be 403 for a barista, got ${status}`);
   });
 
+  await test("customers can switch the chat to 中文 and the pickup screen to Malay", async () => {
+    const page = (pages.lang = await browser!.newPage());
+    await page.goto(`${BASE}/`);
+    await page.waitFor(`document.getElementById("business-name").textContent === "Bean & Byte Café"`, { what: "chat loaded" });
+    await page.run(`const s = document.getElementById("lang-select"); s.value = "zh"; s.dispatchEvent(new Event("change"));`);
+    await page.waitFor(`document.documentElement.lang === "zh-Hans" && document.getElementById("new-chat").textContent === "新对话" && document.getElementById("business-name").textContent === "Bean & Byte Café" && !document.getElementById("order-btn").hidden`, { what: "Chinese chat" });
+    await page.run(`document.getElementById("order-btn").click();`);
+    const hint = await page.waitFor<string>(`document.querySelector(".order-card .hint")?.textContent`, { what: "Chinese order card" });
+    assert(hint.includes("柜台"), `order card should be in Chinese: ${hint}`);
+    // The choice is remembered on the next visit.
+    await page.goto(`${BASE}/`);
+    await page.waitFor(`document.getElementById("lang-select").value === "zh"`, { what: "remembered language" });
+    await page.run(`localStorage.removeItem("lang");`);
+
+    await page.goto(`${BASE}/display?tenant=${TENANT}&lang=ms`);
+    const title = await page.waitFor<string>(`document.getElementById("ready-title").textContent`);
+    assert(title === "Sedia untuk diambil", `pickup screen should be in Malay, got "${title}"`);
+    assert(page.errors.length === 0, `uncaught errors:\n${page.errors.join("\n")}`);
+    page.close();
+    delete pages.lang;
+  });
+
   await test("works on a phone without sideways scrolling", async () => {
     const phone = (pages.phone = await browser!.newPage());
     await phone.setSize(390, 844, true);

@@ -6,32 +6,33 @@
     <title>Order Pickup</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/display.css" />
+    <script src="/i18n.js" defer></script>
     <script src="/display.js" defer></script>
   </head>
   <body>
     <header class="bar">
       <div>
-        <h1 id="name">Order pickup</h1>
-        <p class="sub">Listen for your number</p>
+        <h1 id="name" data-i18n="orderPickup">Order pickup</h1>
+        <p class="sub" data-i18n="listen">Listen for your number</p>
       </div>
       <div class="bar-right">
         <span class="clock" id="clock"></span>
-        <button id="sound" type="button">Tap to turn on sound</button>
-        <button id="fullscreen" type="button" aria-label="Full screen">⛶</button>
+        <button id="sound" type="button" data-i18n="tapSound">Tap to turn on sound</button>
+        <button id="fullscreen" type="button" aria-label="Full screen" data-i18n-aria="fullScreen">⛶</button>
       </div>
     </header>
 
     <main class="board">
       <section class="col preparing" aria-labelledby="prep-title">
-        <h2 id="prep-title">Preparing</h2>
+        <h2 id="prep-title" data-i18n="preparing">Preparing</h2>
         <div class="numbers" id="preparing"></div>
       </section>
       <section class="col ready" aria-labelledby="ready-title">
-        <h2 id="ready-title">Ready to collect</h2>
+        <h2 id="ready-title" data-i18n="readyToCollect">Ready to collect</h2>
         <div class="numbers" id="ready" aria-live="polite"></div>
       </section>
     </main>
 
-    <p class="offline" id="offline" hidden>Can't reach the café's server. Retrying…</p>
+    <p class="offline" id="offline" data-i18n="serverDown" hidden>Can't reach the café's server. Retrying…</p>
   </body>
 </html>

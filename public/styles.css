@@ -130,6 +130,17 @@ button {
   background: var(--surface-2);
 }
 
+.lang-select {
+  flex: none;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
 /* Messages */
 .messages {
   flex: 1;
@@ -538,7 +549,8 @@ button {
   .topbar .title {
     flex: 1 1 calc(100% - 54px);
   }
-  .topbar .ghost {
+  .topbar .ghost,
+  .topbar .lang-select {
     flex: 1 1 0;
     padding: 8px 6px;
     font-size: 13px;

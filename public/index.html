@@ -8,6 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Support Chat</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/i18n.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -15,28 +16,29 @@
       <header class="topbar">
         <div class="avatar" id="avatar" aria-hidden="true">?</div>
         <div class="title">
-          <h1 id="business-name">Loading…</h1>
+          <h1 id="business-name" data-i18n="loading">Loading…</h1>
           <p class="subtitle">
             <span id="assistant-line">Support assistant</span>
-            <span class="badge" id="fictional-badge" hidden>Fictional demo business</span>
-            <span class="badge badge-warn" id="mode-badge" hidden>Offline mode</span>
+            <span class="badge" id="fictional-badge" data-i18n="fictional" hidden>Fictional demo business</span>
+            <span class="badge badge-warn" id="mode-badge" data-i18n="offline" hidden>Offline mode</span>
           </p>
         </div>
-        <button class="ghost" id="new-chat" type="button" title="Start a new conversation">New chat</button>
+        <select class="lang-select" id="lang-select" data-i18n-aria="language"></select>
+        <button class="ghost" id="new-chat" type="button" title="Start a new conversation" data-i18n="newChat" data-i18n-title="newChatTitle">New chat</button>
       </header>
 
-      <nav class="quick-actions" id="quick-actions" aria-label="Quick actions" hidden>
-        <button type="button" id="order-btn" hidden><span aria-hidden="true">🥤</span> Order ahead</button>
-        <button type="button" id="book-btn" hidden><span aria-hidden="true">📅</span> Book a table</button>
-        <button type="button" id="manage-btn" hidden><span aria-hidden="true">🔎</span> My booking</button>
-        <button type="button" id="points-btn" hidden><span aria-hidden="true">★</span> My points</button>
+      <nav class="quick-actions" id="quick-actions" aria-label="Quick actions" data-i18n-aria="quickActions" hidden>
+        <button type="button" id="order-btn" hidden><span aria-hidden="true">🥤</span> <span data-i18n="orderAhead">Order ahead</span></button>
+        <button type="button" id="book-btn" hidden><span aria-hidden="true">📅</span> <span data-i18n="bookTable">Book a table</span></button>
+        <button type="button" id="manage-btn" hidden><span aria-hidden="true">🔎</span> <span data-i18n="myBooking">My booking</span></button>
+        <button type="button" id="points-btn" hidden><span aria-hidden="true">★</span> <span id="points-label" data-i18n="myPointsDefault">My points</span></button>
       </nav>
       <div class="demo-strip" id="demo-strip" hidden></div>
 
       <main class="messages" id="messages" aria-live="polite">
         <section class="welcome" id="welcome">
-          <h2 id="welcome-title">Hi! How can I help?</h2>
-          <p>Answers come from the business's own documents, with sources.</p>
+          <h2 id="welcome-title" data-i18n="welcomeGeneric">Hi! How can I help?</h2>
+          <p data-i18n="welcomeSub">Answers come from the business's own documents, with sources.</p>
           <div class="suggestions" id="suggestions"></div>
         </section>
       </main>
@@ -47,16 +49,18 @@
           rows="1"
           maxlength="1000"
           placeholder="Ask a question…"
+          data-i18n-placeholder="askPlaceholder"
           aria-label="Your message"
+          data-i18n-aria="yourMessage"
           autocomplete="off"
         ></textarea>
-        <button type="submit" id="send" aria-label="Send">
+        <button type="submit" id="send" aria-label="Send" data-i18n-aria="send">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path d="M3 20.5 21 12 3 3.5l2.5 8.5L3 20.5Zm2.5-8.5H13" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
           </svg>
         </button>
       </form>
-      <p class="footnote">AI answers can be wrong. Don't share personal or payment details.</p>
+      <p class="footnote" data-i18n="footnote">AI answers can be wrong. Don't share personal or payment details.</p>
     </div>
   </body>
 </html>

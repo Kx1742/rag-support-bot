@@ -35,16 +35,16 @@ async function refresh() {
 
 function render(board) {
   $("name").textContent = board.name;
-  document.title = `${board.name} · Order pickup`;
+  document.title = `${board.name} · ${t("orderPickup")}`;
 
   const fresh = board.ready.filter((n) => !knownReady.has(n));
   if (!firstLoad && fresh.length) chime();
   knownReady = new Set(board.ready);
   firstLoad = false;
 
-  $("preparing").replaceChildren(...numbers(board.preparing, [], "No orders being made right now"));
+  $("preparing").replaceChildren(...numbers(board.preparing, [], t("prepEmpty")));
   // The server sends ready orders newest-call first.
-  $("ready").replaceChildren(...numbers(board.ready, fresh, "Your number will appear here when it's ready"));
+  $("ready").replaceChildren(...numbers(board.ready, fresh, t("readyEmpty")));
 }
 
 function numbers(list, fresh, emptyText) {
@@ -77,7 +77,7 @@ function listen() {
 }
 
 function tick() {
-  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("clock").textContent = new Date().toLocaleTimeString(lang === "zh" ? "zh-CN" : lang === "ms" ? "ms-MY" : [], { hour: "2-digit", minute: "2-digit" });
 }
 
 // Browsers only allow sound after a tap on the page.
@@ -85,11 +85,11 @@ $("sound").addEventListener("click", () => {
   try {
     audio ??= new AudioContext();
     audio.resume();
-    $("sound").textContent = "Sound on";
+    $("sound").textContent = t("soundOn");
     $("sound").classList.add("on");
     chime();
   } catch {
-    $("sound").textContent = "No sound on this device";
+    $("sound").textContent = t("noSound");
   }
 });
 
@@ -100,11 +100,11 @@ $("fullscreen").addEventListener("click", () => {
 
 function chime() {
   if (!audio || audio.state !== "running") return;
-  const t = audio.currentTime;
+  const at0 = audio.currentTime;
   [660, 880, 1100].forEach((freq, i) => {
     const osc = audio.createOscillator();
     const gain = audio.createGain();
-    const at = t + i * 0.18;
+    const at = at0 + i * 0.18;
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.0001, at);
     gain.gain.exponentialRampToValueAtTime(0.3, at + 0.02);

@@ -2,8 +2,8 @@
 // - Pages and static files: network first (always fresh when online), cached copy when offline.
 // - /api/ requests are never touched: orders, payments and bookings always go to the server.
 
-const CACHE = "shell-v1";
-const SHELL = ["/", "/app.js", "/styles.css", "/desk", "/desk.js", "/desk.css", "/display", "/display.js", "/display.css", "/icon.svg"];
+const CACHE = "shell-v2";
+const SHELL = ["/", "/app.js", "/i18n.js", "/styles.css", "/desk", "/desk.js", "/desk.css", "/display", "/display.js", "/display.css", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

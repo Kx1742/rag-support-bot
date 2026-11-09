@@ -62,6 +62,7 @@ export class Browser {
       "--disable-extensions",
       "--hide-scrollbars",
       "--mute-audio",
+      "--lang=en-US", // pages pick their language from the browser; keep tests predictable
       // CI containers often can't use the sandbox.
       ...(process.platform === "linux" ? ["--no-sandbox", "--disable-dev-shm-usage"] : []),
       "about:blank",
@@ -83,9 +84,13 @@ export class Browser {
   /** Opens a new tab. */
   async newPage(): Promise<Page> {
     const target = (await fetch(`http://127.0.0.1:${this.port}/json/new?about:blank`, { method: "PUT" }).then((r) => r.json())) as {
+      id: string;
       webSocketDebuggerUrl: string;
     };
-    return connectPage(target.webSocketDebuggerUrl);
+    // Closing must close the tab itself: open tabs keep their live-update connections, and
+    // browsers allow only 6 connections per server, so leftover tabs stall later pages.
+    const closeTab = () => fetch(`http://127.0.0.1:${this.port}/json/close/${target.id}`).catch(() => {});
+    return connectPage(target.webSocketDebuggerUrl, closeTab);
   }
 
   close(): void {
@@ -94,7 +99,7 @@ export class Browser {
   }
 }
 
-async function connectPage(wsUrl: string): Promise<Page> {
+async function connectPage(wsUrl: string, closeTab: () => Promise<unknown>): Promise<Page> {
   const ws = new WebSocket(wsUrl);
   await new Promise((ok, fail) => {
     ws.onopen = ok;
@@ -162,6 +167,7 @@ async function connectPage(wsUrl: string): Promise<Page> {
     },
     close() {
       ws.close();
+      void closeTab();
     },
   };
 }
