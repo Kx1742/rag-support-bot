@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assertValidTenantId, TENANTS_DIR } from "../tenant.ts";
+import { assertValidTenantId, tenantsDir } from "../tenant.ts";
 import { isTime, toMinutes, WEEKDAYS, type Weekday } from "./time.ts";
 
 export interface TableConfig {
@@ -94,11 +94,11 @@ export interface LoyaltyConfig {
 }
 
 /** Loads tenants/<id>/shop.json. Returns null when the tenant has no shop features. */
-export async function loadShopConfig(tenantId: string, tenantsDir = TENANTS_DIR): Promise<ShopConfig | null> {
+export async function loadShopConfig(tenantId: string, dir = tenantsDir()): Promise<ShopConfig | null> {
   assertValidTenantId(tenantId);
   let raw: string;
   try {
-    raw = await readFile(join(tenantsDir, tenantId, "shop.json"), "utf8");
+    raw = await readFile(join(dir, tenantId, "shop.json"), "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;

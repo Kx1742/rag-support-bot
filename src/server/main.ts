@@ -6,7 +6,7 @@ import type { Assistant } from "../rag/assistant.ts";
 import { DEMO_ACCOUNTS, seedDemo } from "../shop/demo.ts";
 import { openShop, type Shop } from "../shop/shop.ts";
 import { zonedNow } from "../shop/time.ts";
-import { dataDir, TENANTS_DIR } from "../tenant.ts";
+import { dataDir, tenantsDir } from "../tenant.ts";
 import { passwordFromEnv, StaffAuth } from "./auth.ts";
 import { createAppServer } from "./http.ts";
 import { DailyCap, RateLimiter } from "./rateLimit.ts";
@@ -21,7 +21,7 @@ const DEMO_RESET_HOUR = Number(env.DEMO_RESET_HOUR ?? 4);
 const backupEveryHours = Number(env.BACKUP_EVERY_HOURS ?? 24);
 
 function tenantExists(tenantId: string): boolean {
-  return /^[a-z0-9][a-z0-9-]{0,62}$/.test(tenantId) && existsSync(join(TENANTS_DIR, tenantId, "tenant.json"));
+  return /^[a-z0-9][a-z0-9-]{0,62}$/.test(tenantId) && existsSync(join(tenantsDir(), tenantId, "tenant.json"));
 }
 
 /** Caches one promise per tenant; a failed load is forgotten so the next request retries. */

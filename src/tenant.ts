@@ -4,7 +4,10 @@ import type { SourceDocument, TenantConfig } from "./types.ts";
 
 const SUPPORTED_EXTENSIONS = [".md", ".txt"];
 
-export const TENANTS_DIR = resolve(import.meta.dirname, "..", "tenants");
+/** Where business folders live. TENANTS_DIR overrides it (used by the end-to-end tests). */
+export function tenantsDir(): string {
+  return process.env.TENANTS_DIR ? resolve(process.env.TENANTS_DIR) : resolve(import.meta.dirname, "..", "tenants");
+}
 /**
  * Where indexes and shop databases live. Set DATA_DIR to put them on a persistent disk
  * (e.g. /var/data on Render). Read lazily so a value from .env is picked up.
@@ -27,10 +30,10 @@ export function indexPath(tenantId: string, dir = dataDir()): string {
 
 export async function loadTenant(
   tenantId: string,
-  tenantsDir = TENANTS_DIR,
+  root = tenantsDir(),
 ): Promise<{ config: TenantConfig; docs: SourceDocument[] }> {
   assertValidTenantId(tenantId);
-  const dir = join(tenantsDir, tenantId);
+  const dir = join(root, tenantId);
   const config = JSON.parse(await readFile(join(dir, "tenant.json"), "utf8")) as TenantConfig;
   if (config.id !== tenantId) {
     throw new Error(`tenant.json id "${config.id}" does not match folder "${tenantId}"`);

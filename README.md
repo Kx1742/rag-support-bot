@@ -91,7 +91,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
-- 152 tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 152 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 10 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, phone layout); they run on every push, with failure screenshots saved
 
 ## How it works
 
@@ -187,6 +188,7 @@ them. Unexpected errors are not.
 | Money formatted in the shop's locale, not the browser's | A US café shows "$4.75" on every till, not "US$4.75" on a till set to another region. |
 | Request logs keep the path only | Query strings can contain phone numbers; logs shouldn't. |
 | One receipt builder on the server for the till and the customer | Printed and digital receipts can't disagree. |
+| E2E tests run their own server on a test copy of the café that is open all day, at local midday | Results don't depend on what time CI happens to run. |
 | Service worker caches pages only, network-first, never `/api/` | Staff always see live orders and payments; only the page shell survives a dropped connection. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
@@ -212,7 +214,8 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 152 tests
+npm test                      # 152 unit and API tests
+npm run e2e                   # 10 browser tests (needs Edge or Chrome)
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```

@@ -17,3 +17,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # Real user journeys in headless Chrome (preinstalled on GitHub's Ubuntu runners).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # No npm install needed: the app and the test runner only use Node's built-ins.
+      - run: npm run e2e
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: e2e-artifacts/
+          if-no-files-found: ignore
