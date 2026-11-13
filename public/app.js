@@ -52,9 +52,14 @@ async function init() {
 
   document.title = `${tenant.name} · Support`;
   $("business-name").textContent = tenant.name;
-  $("avatar").textContent = tenant.name.trim().charAt(0).toUpperCase();
+  const initial = tenant.name.trim().charAt(0).toUpperCase();
+  $("avatar").textContent = initial;
+  document.documentElement.style.setProperty("--initial", JSON.stringify(initial)); // shown beside the café's answers
+  renderPlace(tenant.place);
   $("assistant-line").textContent = t("assistantLine", { name: tenant.assistantName });
-  $("welcome-title").textContent = t("welcome", { name: tenant.assistantName });
+  // "Hi, I'm <mark>Byte</mark>! How can I help?" in any language: split the sentence around the name.
+  const [before, after = ""] = t("welcome", { name: "\u0000" }).split("\u0000");
+  $("welcome-title").replaceChildren(before, el("mark", {}, tenant.assistantName), after);
   $("fictional-badge").hidden = !tenant.fictional;
   $("mode-badge").hidden = config.mode !== "offline";
   if (tenant.brandColor) document.documentElement.style.setProperty("--brand", tenant.brandColor);
@@ -76,13 +81,54 @@ async function init() {
   if (tenant.loyalty) $("points-label").textContent = t("myPoints", { program: tenant.loyalty.name });
 
   for (const question of tenant.suggestedQuestions) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = question;
-    button.addEventListener("click", () => sendMessage(question));
-    els.suggestions.append(button);
+    els.suggestions.append(el("button", { type: "button", onclick: () => sendMessage(question) }, el("span", {}, question), icon("arrow")));
   }
-  els.input.focus();
+  // Don't pop the phone keyboard up over the café's welcome screen.
+  if (matchMedia("(min-width: 901px)").matches) els.input.focus();
+}
+
+/** The café panel: open now or when it opens next, today's hours, address and phone. */
+function renderPlace(place) {
+  if (!place) return;
+  const time = (hhmm) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return new Intl.DateTimeFormat(document.documentElement.lang, { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, h, m));
+  };
+  // 8 Nov 2026 was a Sunday, so day i of WEEKDAYS is 8 + i November.
+  const dayName = (day) =>
+    new Intl.DateTimeFormat(document.documentElement.lang, { weekday: "long" }).format(new Date(2026, 10, 8 + ["sun", "mon", "tue", "wed", "thu", "fri", "sat"].indexOf(day)));
+
+  const status = $("venue-status");
+  status.hidden = false;
+  status.classList.toggle("open", place.open);
+  $("status-text").textContent = place.open
+    ? t("openUntil", { time: time(place.today[1]) })
+    : !place.next
+      ? t("closedNow")
+      : place.next.in === 0
+        ? t("opensAt", { time: time(place.next.time) })
+        : place.next.in === 1
+          ? t("opensTomorrow", { time: time(place.next.time) })
+          : t("opensOn", { day: dayName(place.next.day), time: time(place.next.time) });
+
+  $("venue-facts").hidden = false;
+  $("fact-hours").textContent = place.today ? t("hoursToday", { open: time(place.today[0]), close: time(place.today[1]) }) : t("closedToday");
+  $("fact-address-row").hidden = !place.address;
+  $("fact-address").textContent = place.address;
+  $("fact-phone-row").hidden = !place.phone;
+  $("fact-phone").textContent = place.phone;
+  $("fact-phone").href = `tel:${place.phone.replace(/[^0-9+]/g, "")}`;
+}
+
+/** A line icon from the page's icon set. */
+function icon(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "i");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
 }
 
 // ---------- Sending ----------
@@ -337,7 +383,33 @@ function showAction(action) {
 function addCard(node) {
   els.welcome.hidden = true;
   els.messages.append(node);
-  scrollToBottom();
+  if (node.tagName === "FORM") {
+    node.addEventListener("keydown", (e) => e.key === "Escape" && node.remove());
+    // Show the card from its title, and put the cursor in its first field (not on phones,
+    // where the keyboard would cover the card).
+    node.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (matchMedia("(min-width: 901px)").matches) node.querySelector("input:not([type=date]), select")?.focus({ preventScroll: true });
+  } else {
+    scrollToBottom();
+  }
+}
+
+/** If this kind of form is already open, bring it into view instead of opening a second one. */
+function showOpenCard(kind) {
+  const open = els.messages.querySelector(`form[data-kind="${kind}"]`);
+  if (!open) return false;
+  open.scrollIntoView({ block: "start", behavior: "smooth" });
+  open.classList.remove("nudge");
+  void open.offsetWidth; // restart the animation
+  open.classList.add("nudge");
+  return true;
+}
+
+/** Shows a short "Working…" label on a button while a request runs. */
+function busyLabel(button, text) {
+  const before = button.textContent;
+  button.textContent = text;
+  return () => (button.textContent = before);
 }
 
 function addBookingConfirmation(b) {
@@ -361,6 +433,7 @@ function addBookingConfirmation(b) {
 }
 
 function openBookingCard() {
+  if (showOpenCard("book")) return;
   const info = tenantInfo.booking;
   const maxDate = shiftDate(info.today, info.maxDaysAhead);
   let chosenTime = null;
@@ -379,10 +452,34 @@ function openBookingCard() {
   const submit = el("button", { type: "submit", class: "primary", disabled: true }, t("bookBtn"));
   const close = el("button", { type: "button", class: "ghost" }, t("close"));
 
+  // One-tap dates for the coming week; the date field still allows any day in range.
+  const days = el("div", { class: "days", role: "group", "aria-label": t("date") });
+  const dayLabel = (d, i) =>
+    i === 0 ? t("today") : i === 1 ? t("tomorrow") : new Intl.DateTimeFormat(document.documentElement.lang, { weekday: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${d}T12:00:00Z`));
+  const renderDays = () =>
+    days.replaceChildren(
+      ...Array.from({ length: Math.min(7, info.maxDaysAhead + 1) }, (_, i) => shiftDate(info.today, i)).map((d, i) =>
+        el(
+          "button",
+          {
+            type: "button",
+            "aria-pressed": String(d === date.value),
+            onclick: () => {
+              date.value = d;
+              renderDays();
+              loadTimes();
+            },
+          },
+          dayLabel(d, i),
+        ),
+      ),
+    );
+
   const form = el(
     "form",
-    { class: "booking-card form" },
+    { class: "booking-card form", "data-kind": "book" },
     el("strong", {}, t("bookTable")),
+    days,
     el("div", { class: "row" }, el("label", {}, t("date"), date), el("label", {}, t("people"), party)),
     el("div", { class: "label" }, t("time")),
     times,
@@ -422,13 +519,18 @@ function openBookingCard() {
     }
   }
 
-  date.addEventListener("change", loadTimes);
+  date.addEventListener("change", () => {
+    renderDays();
+    loadTimes();
+  });
   party.addEventListener("change", loadTimes);
+  renderDays();
   close.addEventListener("click", () => form.remove());
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     error.textContent = "";
     submit.disabled = true;
+    const done = busyLabel(submit, t("working"));
     try {
       const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/bookings`, {
         method: "POST",
@@ -447,6 +549,7 @@ function openBookingCard() {
       form.remove();
       addBookingConfirmation(data.booking);
     } catch (err) {
+      done();
       error.textContent = err.message;
       submit.disabled = false;
       if (/booked|available/i.test(err.message)) loadTimes();
@@ -459,6 +562,7 @@ function openBookingCard() {
 
 /** Customers look up (and cancel) their own booking with its reference + phone number. */
 function openManageCard() {
+  if (showOpenCard("manage")) return;
   const reference = el("input", { maxlength: "12", autocomplete: "off", placeholder: "e.g. BB-7K3QX", required: true });
   const phone = el("input", { type: "tel", autocomplete: "tel", required: true });
   const error = el("p", { class: "form-error", role: "alert" });
@@ -468,7 +572,7 @@ function openManageCard() {
 
   const form = el(
     "form",
-    { class: "booking-card form" },
+    { class: "booking-card form", "data-kind": "manage" },
     el("strong", {}, t("yourBooking")),
     el("div", { class: "hint" }, t("lookupHint")),
     el("div", { class: "row" }, el("label", {}, t("reference"), reference), el("label", {}, t("phone"), phone)),
@@ -545,6 +649,7 @@ function openManageCard() {
 
 /** Order-ahead card: pick items (with options), a pickup time, name and phone. Pay at pickup. */
 async function openOrderCard() {
+  if (showOpenCard("order")) return;
   let data;
   try {
     data = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}/menu`);
@@ -598,7 +703,7 @@ async function openOrderCard() {
 
   const form = el(
     "form",
-    { class: "booking-card form order-card" },
+    { class: "booking-card form order-card", "data-kind": "order" },
     el("strong", {}, t("orderAhead")),
     el("div", { class: "hint" }, payHint()),
     tabs,
@@ -654,6 +759,7 @@ async function openOrderCard() {
                 },
               },
               "+",
+              inCart(item) ? el("span", { class: "count", "aria-hidden": "true" }, String(inCart(item))) : null,
             ),
           );
           return picking?.id === item.id ? [row, optionPicker(item)] : [row];
@@ -699,6 +805,8 @@ async function openOrderCard() {
     return box;
   }
 
+  const inCart = (item) => cart.filter((l) => l.item.id === item.id).reduce((n, l) => n + l.qty, 0);
+
   function addToCart(item, options) {
     const key = JSON.stringify([item.id, Object.entries(options).sort()]);
     const line = cart.find((l) => l.key === key);
@@ -707,6 +815,10 @@ async function openOrderCard() {
     picking = null;
     renderList();
     renderCart();
+    // A little bounce on the order total so the customer sees it was added.
+    submit.classList.remove("bump");
+    void submit.offsetWidth;
+    submit.classList.add("bump");
   }
 
   function renderCart() {
@@ -724,7 +836,7 @@ async function openOrderCard() {
             el(
               "div",
               { class: "cart-line" },
-              el("div", {}, el("div", {}, `${l.qty}× ${l.item.name}`), l.label ? el("div", { class: "hint" }, l.label) : null),
+              el("div", {}, el("div", {}, el("b", {}, `${l.qty}×`), ` ${l.item.name}`), l.label ? el("div", { class: "hint" }, l.label) : null),
               el("span", {}, money(l.unit * l.qty)),
               el(
                 "button",
@@ -754,6 +866,7 @@ async function openOrderCard() {
     e.preventDefault();
     error.textContent = "";
     submit.disabled = true;
+    const done = busyLabel(submit, t("working"));
     try {
       const res = await fetch(`/api/tenants/${encodeURIComponent(tenantId)}/orders`, {
         method: "POST",
@@ -774,6 +887,7 @@ async function openOrderCard() {
       rememberOrder(out.order.trackingToken);
       trackOrder(out.order);
     } catch (err) {
+      done();
       error.textContent = err.message;
       submit.disabled = cart.length === 0;
     }
@@ -788,6 +902,7 @@ async function openOrderCard() {
 // ---------- Loyalty balance ----------
 
 function openPointsCard() {
+  if (showOpenCard("points")) return;
   const program = tenantInfo.loyalty?.name ?? t("points");
   const phone = el("input", { type: "tel", autocomplete: "tel", required: true, placeholder: t("joinedNumber") });
   const error = el("p", { class: "form-error", role: "alert" });
@@ -796,7 +911,7 @@ function openPointsCard() {
   const close = el("button", { type: "button", class: "ghost" }, t("close"));
   const form = el(
     "form",
-    { class: "booking-card form" },
+    { class: "booking-card form", "data-kind": "points" },
     el("strong", {}, t("myPoints", { program })),
     el("label", {}, t("phone"), phone),
     error,

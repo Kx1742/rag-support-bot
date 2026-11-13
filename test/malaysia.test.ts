@@ -4,7 +4,7 @@ import { ExtractiveChat, keywords, LocalEmbedder } from "../src/llm/offline.ts";
 import { Assistant } from "../src/rag/assistant.ts";
 import { buildIndex } from "../src/rag/indexer.ts";
 import { VectorStore } from "../src/rag/vectorStore.ts";
-import { cashDue, chargesFor, loadShopConfig, type ShopConfig, validateShopConfig } from "../src/shop/config.ts";
+import { cashDue, chargesFor, loadShopConfig, openingStatus, type ShopConfig, validateShopConfig } from "../src/shop/config.ts";
 import { seedDemo } from "../src/shop/demo.ts";
 import { loadTenant } from "../src/tenant.ts";
 import { makeShop } from "./helpers.ts";
@@ -112,6 +112,18 @@ describe("SST, service charge and cash rounding", () => {
     assert.throws(bad({ payments: { methods: ["cash", "cheque" as "cash"] } }), /payments.methods/);
     assert.throws(bad({ payments: { methods: [] } }), /payments.methods/);
     assert.throws(bad({ cashRounding: 3 }), /cashRounding/);
+  });
+});
+
+describe("opening status for the café panel", () => {
+  it("says open now, or when the café next opens", async () => {
+    const config = (await loadShopConfig("bean-and-byte"))!; // New York; Fri 07-18, Sat 08-17
+    const at = (iso: string) => openingStatus(config, new Date(iso));
+    assert.deepEqual(at("2026-11-13T15:00:00Z"), { open: true, today: ["07:00", "18:00"], next: null }); // Fri 10:00
+    assert.deepEqual(at("2026-11-13T11:00:00Z").next, { in: 0, day: "fri", time: "07:00" }); // Fri 06:00
+    assert.deepEqual(at("2026-11-13T23:30:00Z").next, { in: 1, day: "sat", time: "08:00" }); // Fri 18:30
+    // Christmas is closed: on Christmas Eve evening it next opens on the 26th.
+    assert.deepEqual(at("2026-12-24T23:30:00Z").next, { in: 2, day: "sat", time: "08:00" });
   });
 });
 

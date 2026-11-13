@@ -50,6 +50,12 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 ## Features
 
 **Customer chat** (`/`)
+- **Calm, friendly design**: cream background, white panels on soft shadows (no hard outlines), pastel
+  lime/pink/blue/coral accents and playful geometric tiles; a café panel shows **open now / opens at…**, today's hours, address and
+  tap-to-call phone, with the four actions as colour-coded buttons (a compact swipeable row on phones)
+- **Easy flows**: order total stays pinned while browsing the menu, + buttons show how many are in the
+  order, one-tap "Today / Tomorrow / Sat 15" dates for bookings, cards open at their title, tapping an
+  action twice brings back the open form instead of a duplicate, Esc closes a form
 - Grounded answers with clickable citations, streamed over Server-Sent Events
 - **Books and cancels tables in conversation** (Gemini function calling), always confirming first
 - "Book a table" form in the chat, which also works without AI
@@ -216,6 +222,7 @@ them. Unexpected errors are not.
 | Service worker caches pages only, network-first, never `/api/` | Staff always see live orders and payments; only the page shell survives a dropped connection. |
 | Charges and cash rounding stored on each order (charges when ordered, rounding when paid in cash) | Old receipts and reports stay right after a tax rate changes, and the report can show exactly how much SST was collected. |
 | Cash rounding applied at payment, not to the order total | The same order costs RM10.81 by card or DuitNow but RM10.80 in cash, as at a real Malaysian till. |
+| No web fonts, images or icon libraries: system fonts, an inline SVG icon set and CSS shapes | Works under a strict Content-Security-Policy, loads instantly, nothing to license. |
 | Customer pages translated in the browser from one small file; café content left as written | Adding a language is one dictionary; menus and documents stay exactly as the café wrote them. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertValidTenantId, tenantsDir } from "../tenant.ts";
-import { isTime, toMinutes, WEEKDAYS, type Weekday } from "./time.ts";
+import { addDays, isTime, toMinutes, WEEKDAYS, type Weekday, weekdayOf, zonedNow } from "./time.ts";
 
 export interface TableConfig {
   id: string;
@@ -136,6 +136,26 @@ export function cashDue(config: Pick<ShopConfig, "cashRounding">, total: number)
 /** Enabled payment methods (default cash and card). */
 export function paymentMethods(config: Pick<ShopConfig, "payments">): PaymentMethodId[] {
   return config.payments?.methods ?? ["cash", "card"];
+}
+
+/**
+ * Is the shop open right now, today's hours, and when it next opens (for "Open now · until 6 PM").
+ * `next` is null while open; `in` is 0 for later today, 1 for tomorrow, and so on.
+ */
+export function openingStatus(config: Pick<ShopConfig, "timezone" | "openingHours" | "closedDates">, now: Date) {
+  const { date, minutes } = zonedNow(config.timezone, now);
+  const hoursOn = (d: string) => (config.closedDates.includes(d) ? null : (config.openingHours[weekdayOf(d)] ?? null));
+  const today = hoursOn(date);
+  const open = !!today && minutes >= toMinutes(today[0]) && minutes < toMinutes(today[1]);
+  let next: { in: number; day: Weekday; time: string } | null = null;
+  if (!open) {
+    for (let i = 0; i <= 7 && !next; i++) {
+      const d = addDays(date, i);
+      const h = hoursOn(d);
+      if (h && (i > 0 || minutes < toMinutes(h[0]))) next = { in: i, day: weekdayOf(d), time: h[0] };
+    }
+  }
+  return { open, today, next };
 }
 
 /** Loads tenants/<id>/shop.json. Returns null when the tenant has no shop features. */

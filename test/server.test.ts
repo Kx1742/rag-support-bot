@@ -164,6 +164,7 @@ describe("HTTP server", () => {
       brandColor: null,
       orderAhead: false,
       money: null,
+      place: null,
       payments: null,
       loyalty: null,
       booking: null,

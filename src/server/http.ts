@@ -6,7 +6,7 @@ import type { Assistant } from "../rag/assistant.ts";
 import type { Shop, ShopChange } from "../shop/shop.ts";
 import { isDate } from "../shop/time.ts";
 import type { TenantConfig } from "../types.ts";
-import { chargesFor, paymentMethods } from "../shop/config.ts";
+import { openingStatus, paymentMethods } from "../shop/config.ts";
 import type { StaffAuth } from "./auth.ts";
 import { handleDesk } from "./desk.ts";
 import {
@@ -364,6 +364,10 @@ export function publicTenantInfo(t: TenantConfig, shop: Shop | null = null, canU
     brandColor: t.brandColor && /^#[0-9a-f]{6}$/i.test(t.brandColor) ? t.brandColor : null,
     orderAhead: !!shop?.config.orderAhead,
     money: shop ? { currency: shop.config.currency, locale: shop.config.locale ?? "en-US" } : null,
+    /** For the café panel: address, phone, and whether it's open right now. */
+    place: shop
+      ? { address: shop.config.receipt?.address ?? "", phone: shop.config.receipt?.phone ?? "", ...openingStatus(shop.config, shop.now()) }
+      : null,
     /** How customers can pay at the counter, e.g. ["cash", "card", "DuitNow QR"]. */
     payments: shop ? paymentMethods(shop.config).map((m) => (m === "qr" ? (shop.config.payments?.qrName ?? "QR payment") : m)) : null,
     loyalty: shop?.config.loyalty ? { name: shop.config.loyalty.name } : null,

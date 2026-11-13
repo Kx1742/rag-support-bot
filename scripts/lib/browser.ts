@@ -51,7 +51,16 @@ export class Browser {
   }
 
   static async launch(opts: { port?: number } = {}): Promise<Browser> {
-    const port = opts.port ?? 9335;
+    // Skip ports a leftover browser (e.g. from an interrupted run) still holds: connecting to it
+    // would reuse its profile, saved settings and all.
+    let port = opts.port ?? 9335;
+    for (let tries = 0; tries < 20; tries++, port++) {
+      const busy = await fetch(`http://127.0.0.1:${port}/json/version`).then(
+        () => true,
+        () => false,
+      );
+      if (!busy) break;
+    }
     const profile = mkdtempSync(join(tmpdir(), "browser-"));
     const args = [
       "--headless=new",

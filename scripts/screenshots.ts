@@ -126,7 +126,11 @@ try {
 } finally {
   browser.kill();
   await new Promise((r) => setTimeout(r, 500));
-  rmSync(profile, { recursive: true, force: true });
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch {
+    /* Windows can keep the browser profile locked briefly; it's only a temp folder */
+  }
 }
 
 async function waitForPage(): Promise<string> {

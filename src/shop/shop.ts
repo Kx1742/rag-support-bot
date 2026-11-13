@@ -104,6 +104,11 @@ export class Shop {
     this.db.close();
   }
 
+  /** The shop's clock (controllable in tests). */
+  now(): Date {
+    return (this.clock ?? (() => new Date()))();
+  }
+
   private nowIso(): string {
     return (this.clock ?? (() => new Date()))().toISOString();
   }

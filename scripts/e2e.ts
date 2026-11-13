@@ -73,6 +73,11 @@ async function test(name: string, fn: () => Promise<void>): Promise<void> {
       const file = join(ARTIFACTS, `${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}--${label}.png`);
       await page.screenshot(file).catch(() => {});
     }
+    // Close the failed test's extra tabs: their live connections would slow every later test.
+    for (const label of Object.keys(pages).filter((l) => l !== "chat" && l !== "desk")) {
+      pages[label].close();
+      delete pages[label];
+    }
   }
 }
 
@@ -249,14 +254,18 @@ try {
     await page.goto(`${BASE}/`);
     await page.waitFor(`document.getElementById("business-name").textContent === "Bean & Byte Café"`, { what: "chat loaded" });
     await page.run(`const s = document.getElementById("lang-select"); s.value = "zh"; s.dispatchEvent(new Event("change"));`);
-    await page.waitFor(`document.documentElement.lang === "zh-Hans" && document.getElementById("new-chat").textContent === "新对话" && document.getElementById("business-name").textContent === "Bean & Byte Café" && !document.getElementById("order-btn").hidden`, { what: "Chinese chat" });
-    await page.run(`document.getElementById("order-btn").click();`);
-    const hint = await page.waitFor<string>(`document.querySelector(".order-card .hint")?.textContent`, { what: "Chinese order card" });
-    assert(hint.includes("柜台"), `order card should be in Chinese: ${hint}`);
-    // The choice is remembered on the next visit.
-    await page.goto(`${BASE}/`);
-    await page.waitFor(`document.getElementById("lang-select").value === "zh"`, { what: "remembered language" });
-    await page.run(`localStorage.removeItem("lang");`);
+    try {
+      await page.waitFor(`document.documentElement.lang === "zh-Hans" && document.querySelector("#new-chat span").textContent === "新对话" && document.getElementById("business-name").textContent === "Bean & Byte Café" && !document.getElementById("order-btn").hidden`, { what: "Chinese chat" });
+      await page.run(`document.getElementById("order-btn").click();`);
+      const hint = await page.waitFor<string>(`document.querySelector(".order-card .hint")?.textContent`, { what: "Chinese order card" });
+      assert(hint.includes("柜台"), `order card should be in Chinese: ${hint}`);
+      // The choice is remembered on the next visit.
+      await page.goto(`${BASE}/`);
+      await page.waitFor(`document.getElementById("lang-select").value === "zh"`, { what: "remembered language" });
+    } finally {
+      // Other tabs share this browser's storage: never leave them in Chinese.
+      await page.run(`localStorage.removeItem("lang");`).catch(() => {});
+    }
 
     await page.goto(`${BASE}/display?tenant=${TENANT}&lang=ms`);
     const title = await page.waitFor<string>(`document.getElementById("ready-title").textContent`);

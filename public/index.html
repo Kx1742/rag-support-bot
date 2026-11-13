@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <link rel="manifest" href="/app.webmanifest" />
-    <meta name="theme-color" content="#8a5a3b" />
+    <meta name="theme-color" content="#f5f3ee" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Support Chat</title>
@@ -12,55 +12,134 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <div class="app">
-      <header class="topbar">
-        <div class="avatar" id="avatar" aria-hidden="true">?</div>
-        <div class="title">
-          <h1 id="business-name" data-i18n="loading">Loading…</h1>
-          <p class="subtitle">
-            <span id="assistant-line">Support assistant</span>
-            <span class="badge" id="fictional-badge" data-i18n="fictional" hidden>Fictional demo business</span>
-            <span class="badge badge-warn" id="mode-badge" data-i18n="offline" hidden>Offline mode</span>
-          </p>
+    <!-- Line icons, drawn on a 24px grid. Used with <svg class="i"><use href="#i-name" /></svg>. -->
+    <svg class="sprite" aria-hidden="true">
+      <symbol id="i-cup" viewBox="0 0 24 24"><path d="M5 9h12v4.5A5.5 5.5 0 0 1 11.5 19h-1A5.5 5.5 0 0 1 5 13.5V9Z" /><path d="M17 10.5h1.25a2.25 2.25 0 0 1 0 4.5H17" /><path d="M9 3.5c-.8.9-.8 2.1 0 3M13 3.5c-.8.9-.8 2.1 0 3" /></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14.5" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></symbol>
+      <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-2.75-1.75L12 20.5l-2.75-1.75L6.5 20.5v-17Z" /><path d="M9.5 8.5h5M9.5 12h5" /></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 4 2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.4l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 4Z" /></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h13.5M13 6.5l5.5 5.5-5.5 5.5" /></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5 17.5 11" /></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 20.5s-6-5.2-6-10.5a6 6 0 0 1 12 0c0 5.3-6 10.5-6 10.5Z" /><circle cx="12" cy="10" r="2.2" /></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.2 4.5h2.6l1.4 3.8-1.8 1.3a10.5 10.5 0 0 0 6 6l1.3-1.8 3.8 1.4v2.6a1.6 1.6 0 0 1-1.7 1.6A14.5 14.5 0 0 1 4.6 6.2a1.6 1.6 0 0 1 1.6-1.7Z" /></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 7.5V12l3 2" /></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4c2.3 2.6 2.3 13.4 0 16M12 4c-2.3 2.6-2.3 13.4 0 16" /></symbol>
+      <symbol id="i-compose" viewBox="0 0 24 24"><path d="M12.5 4.5h-6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-6" /><path d="M17.5 3.5 20.5 6.5 13 14H10v-3l7.5-7.5Z" /></symbol>
+    </svg>
+
+    <div class="shell">
+      <aside class="venue" aria-label="About this café">
+        <div class="venue-id">
+          <div class="mark" id="avatar" aria-hidden="true"></div>
+          <div class="venue-name">
+            <h1 id="business-name" data-i18n="loading">Loading…</h1>
+            <p class="status" id="venue-status" hidden><span class="dot" aria-hidden="true"></span><span id="status-text"></span></p>
+          </div>
         </div>
-        <select class="lang-select" id="lang-select" data-i18n-aria="language"></select>
-        <button class="ghost" id="new-chat" type="button" title="Start a new conversation" data-i18n="newChat" data-i18n-title="newChatTitle">New chat</button>
-      </header>
 
-      <nav class="quick-actions" id="quick-actions" aria-label="Quick actions" data-i18n-aria="quickActions" hidden>
-        <button type="button" id="order-btn" hidden><span aria-hidden="true">🥤</span> <span data-i18n="orderAhead">Order ahead</span></button>
-        <button type="button" id="book-btn" hidden><span aria-hidden="true">📅</span> <span data-i18n="bookTable">Book a table</span></button>
-        <button type="button" id="manage-btn" hidden><span aria-hidden="true">🔎</span> <span data-i18n="myBooking">My booking</span></button>
-        <button type="button" id="points-btn" hidden><span aria-hidden="true">★</span> <span id="points-label" data-i18n="myPointsDefault">My points</span></button>
-      </nav>
-      <div class="demo-strip" id="demo-strip" hidden></div>
+        <ul class="facts" id="venue-facts" hidden>
+          <li><svg class="i" aria-hidden="true"><use href="#i-clock" /></svg><span id="fact-hours"></span></li>
+          <li id="fact-address-row"><svg class="i" aria-hidden="true"><use href="#i-pin" /></svg><span id="fact-address"></span></li>
+          <li id="fact-phone-row"><svg class="i" aria-hidden="true"><use href="#i-phone" /></svg><a id="fact-phone"></a></li>
+        </ul>
 
-      <main class="messages" id="messages" aria-live="polite">
-        <section class="welcome" id="welcome">
-          <h2 id="welcome-title" data-i18n="welcomeGeneric">Hi! How can I help?</h2>
-          <p data-i18n="welcomeSub">Answers come from the business's own documents, with sources.</p>
-          <div class="suggestions" id="suggestions"></div>
+        <nav class="actions" id="quick-actions" aria-label="Quick actions" data-i18n-aria="quickActions" hidden>
+          <button type="button" class="action" id="order-btn" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-cup" /></svg>
+            <span class="action-text"><strong data-i18n="orderAhead">Order ahead</strong><small data-i18n="orderAheadDesc">Skip the queue, pay when you collect</small></span>
+            <svg class="i go" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </button>
+          <button type="button" class="action" id="book-btn" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-calendar" /></svg>
+            <span class="action-text"><strong data-i18n="bookTable">Book a table</strong><small data-i18n="bookTableDesc">Pick a time that's free</small></span>
+            <svg class="i go" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </button>
+          <button type="button" class="action" id="manage-btn" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-ticket" /></svg>
+            <span class="action-text"><strong data-i18n="myBooking">My booking</strong><small data-i18n="myBookingDesc">Check or cancel a booking</small></span>
+            <svg class="i go" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </button>
+          <button type="button" class="action" id="points-btn" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-star" /></svg>
+            <span class="action-text"><strong id="points-label" data-i18n="myPointsDefault">My points</strong><small data-i18n="myPointsDesc">Your balance and rewards</small></span>
+            <svg class="i go" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </button>
+        </nav>
+
+        <!-- Decorative pattern tiles (pure shapes, no meaning). -->
+        <svg class="art" viewBox="0 0 280 140" aria-hidden="true">
+          <rect x="0" y="0" width="70" height="70" fill="var(--lime)" />
+          <g fill="var(--blue)">
+            <circle cx="48" cy="35" r="11" /><circle cx="41.5" cy="46.3" r="11" /><circle cx="28.5" cy="46.3" r="11" />
+            <circle cx="22" cy="35" r="11" /><circle cx="28.5" cy="23.7" r="11" /><circle cx="41.5" cy="23.7" r="11" />
+          </g>
+          <circle cx="35" cy="35" r="8" fill="var(--pink)" />
+          <rect x="70" y="0" width="70" height="70" fill="var(--paper)" />
+          <rect x="88" y="8" width="34" height="54" rx="17" fill="var(--pink)" />
+          <rect x="140" y="0" width="70" height="70" fill="var(--blue)" />
+          <path d="M152 14v28a8 8 0 0 0 16 0V28a8 8 0 0 1 16 0v14a8 8 0 0 0 16 0V14" fill="none" stroke="var(--lime)" stroke-width="7" stroke-linecap="round" />
+          <rect x="210" y="0" width="70" height="70" fill="var(--red)" />
+          <path d="M210 70a35 35 0 0 1 70 0Z" fill="var(--paper)" />
+          <rect x="0" y="70" width="70" height="70" fill="var(--pink)" />
+          <path d="M0 140V105a35 35 0 0 1 70 0v35Z" fill="var(--red)" />
+          <rect x="70" y="70" width="70" height="70" fill="var(--blue)" />
+          <circle cx="105" cy="105" r="22" fill="var(--lime)" />
+          <rect x="140" y="70" width="70" height="70" fill="var(--paper)" />
+          <rect x="148" y="91" width="54" height="28" rx="14" fill="var(--blue)" />
+          <circle cx="188" cy="105" r="14" fill="var(--lime)" />
+          <rect x="210" y="70" width="70" height="70" fill="var(--lime)" />
+          <g fill="var(--red)">
+            <circle cx="252" cy="105" r="8" /><circle cx="245" cy="117.1" r="8" /><circle cx="231" cy="117.1" r="8" />
+            <circle cx="224" cy="105" r="8" /><circle cx="231" cy="92.9" r="8" /><circle cx="245" cy="92.9" r="8" />
+          </g>
+          <circle cx="238" cy="105" r="5.5" fill="var(--paper)" />
+        </svg>
+
+        <p class="venue-note">
+          <span class="tag" id="fictional-badge" data-i18n="fictional" hidden>Fictional demo business</span>
+          <span class="tag tag-warn" id="mode-badge" data-i18n="offline" hidden>Offline mode</span>
+        </p>
+      </aside>
+
+      <main class="thread">
+        <header class="thread-bar">
+          <p class="assistant" id="assistant-line">Support assistant</p>
+          <label class="lang">
+            <svg class="i" aria-hidden="true"><use href="#i-globe" /></svg>
+            <select id="lang-select" data-i18n-aria="language"></select>
+          </label>
+          <button class="ghost icon-text" id="new-chat" type="button" title="Start a new conversation" data-i18n-title="newChatTitle">
+            <svg class="i" aria-hidden="true"><use href="#i-compose" /></svg><span data-i18n="newChat">New chat</span>
+          </button>
+        </header>
+        <div class="demo-strip" id="demo-strip" hidden></div>
+
+        <section class="messages" id="messages" aria-live="polite">
+          <section class="welcome" id="welcome">
+            <h2 id="welcome-title" data-i18n="welcomeGeneric">Hi! How can I help?</h2>
+            <p data-i18n="welcomeSub">Answers come from the business's own documents, with sources.</p>
+            <p class="eyebrow" data-i18n="tryAsking">Try asking</p>
+            <div class="suggestions" id="suggestions"></div>
+          </section>
         </section>
-      </main>
 
-      <form class="composer" id="composer">
-        <textarea
-          id="input"
-          rows="1"
-          maxlength="1000"
-          placeholder="Ask a question…"
-          data-i18n-placeholder="askPlaceholder"
-          aria-label="Your message"
-          data-i18n-aria="yourMessage"
-          autocomplete="off"
-        ></textarea>
-        <button type="submit" id="send" aria-label="Send" data-i18n-aria="send">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path d="M3 20.5 21 12 3 3.5l2.5 8.5L3 20.5Zm2.5-8.5H13" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-          </svg>
-        </button>
-      </form>
-      <p class="footnote" data-i18n="footnote">AI answers can be wrong. Don't share personal or payment details.</p>
+        <form class="composer" id="composer">
+          <textarea
+            id="input"
+            rows="1"
+            maxlength="1000"
+            placeholder="Ask a question…"
+            data-i18n-placeholder="askPlaceholder"
+            aria-label="Your message"
+            data-i18n-aria="yourMessage"
+            autocomplete="off"
+          ></textarea>
+          <button type="submit" id="send" aria-label="Send" data-i18n-aria="send">
+            <svg class="i" aria-hidden="true"><use href="#i-send" /></svg>
+          </button>
+        </form>
+        <p class="footnote" data-i18n="footnote">AI answers can be wrong. Don't share personal or payment details.</p>
+      </main>
     </div>
   </body>
 </html>
