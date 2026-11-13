@@ -1,73 +1,89 @@
 /* Shop desk — designed for a tablet on a busy counter:
-   big touch targets (48px+), glanceable states, colour + text (never colour alone). */
+   big touch targets (48px+), glanceable states, colour + text (never colour alone).
+   Same calm style as the customer site: cream background, white surfaces on soft shadows,
+   pastel accents, ink-black main buttons. The "Soft theme" section at the end does the styling. */
 
 :root {
-  --brand: #8a5a3b;
-  --brand-strong: #6e4328;
-  --brand-soft: #f4e7dc;
-  --bar: #2b1d14;
-  --bar-text: #f6efe8;
-  --bar-muted: #c9b8a8;
+  --brand: #1f1d1a; /* main actions are ink; the café's own colour is set as --cafe by the page */
+  --brand-strong: #3f7ff2;
+  --brand-soft: #eff8cc;
+  --bar: #ffffff;
+  --bar-text: #1f1d1a;
+  --bar-muted: #736b60;
 
-  --bg: #f7f2ec;
+  --bg: #f8f5ee;
   --surface: #ffffff;
-  --surface-2: #f2ebe3;
-  --text: #22180f;
-  --muted: #7b6d60;
-  --border: #e7ddd2;
-  --shadow: 0 1px 2px rgb(60 35 15 / 0.06), 0 4px 14px rgb(60 35 15 / 0.06);
+  --surface-2: #f3efe6;
+  --text: #1f1d1a;
+  --muted: #736b60;
+  --border: rgb(31 29 26 / 0.07);
+  --shadow: 0 1px 2px rgb(31 29 26 / 0.04), 0 6px 18px rgb(31 29 26 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(31 29 26 / 0.04), 0 2px 8px rgb(31 29 26 / 0.04);
+  --shadow-lg: 0 2px 6px rgb(31 29 26 / 0.05), 0 24px 56px rgb(31 29 26 / 0.14);
+  --ring: 0 0 0 4px rgb(63 127 242 / 0.18);
 
-  --new: #2563c9;
-  --new-bg: #e6eefc;
-  --prep: #b26a00;
-  --prep-bg: #fff1d6;
-  --ready: #18794e;
-  --ready-bg: #dcf3e6;
-  --late: #c22b1c;
-  --late-bg: #fde6e3;
-  --note-bg: #fff6cc;
+  --lime: #dcf07e;
+  --pink: #ffc4ea;
+  --blue: #3f7ff2;
+  --coral: #ff8a66;
+
+  --new: #1f5fd1;
+  --new-bg: #e3edff;
+  --prep: #9a5b00;
+  --prep-bg: #fff0cf;
+  --ready: #3f7a12;
+  --ready-bg: #eff8cc;
+  --late: #c4441e;
+  --late-bg: #ffe7de;
+  --note-bg: #fff4c7;
   --note-text: #5c4500;
 
-  --cat-1: #8a5a3b;
-  --cat-2: #3f7d4e;
-  --cat-3: #c0632a;
-  --cat-4: #6a54b3;
-  --cat-5: #2f7a8a;
+  --cat-1: #6b8f00;
+  --cat-2: #c0398f;
+  --cat-3: #1f5fd1;
+  --cat-4: #d0562f;
+  --cat-5: #7a5af0;
 
-  --radius: 16px;
-  --radius-sm: 12px;
+  --radius: 20px;
+  --radius-sm: 14px;
   --tap: 48px;
+  --display: "Segoe UI Variable Display", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --brand: #c48a62;
-    --brand-strong: #d9a079;
-    --brand-soft: #3a2a1f;
-    --bar: #120c08;
-    --bg: #17120e;
-    --surface: #221b16;
-    --surface-2: #2d241d;
-    --text: #f4ece4;
-    --muted: #b3a597;
-    --border: #3a2f27;
-    --shadow: none;
-    --new: #84aef5;
-    --new-bg: #1b2a44;
-    --prep: #f2bf5e;
+    --brand: #f3efe7;
+    --brand-strong: #6f9cf5;
+    --brand-soft: #2a3313;
+    --bar: #1c1b19;
+    --bar-text: #f3efe7;
+    --bar-muted: #a9a195;
+    --bg: #131312;
+    --surface: #1c1b19;
+    --surface-2: #262420;
+    --text: #f3efe7;
+    --muted: #a9a195;
+    --border: rgb(255 255 255 / 0.07);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 18px rgb(0 0 0 / 0.25);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.3), 0 24px 56px rgb(0 0 0 / 0.45);
+    --new: #9cc0ff;
+    --new-bg: #1c2a45;
+    --prep: #f2c66e;
     --prep-bg: #3a2c10;
-    --ready: #6fd29f;
-    --ready-bg: #163626;
-    --late: #ff8f82;
-    --late-bg: #47201b;
+    --ready: #b9e07a;
+    --ready-bg: #2a3313;
+    --late: #ffab8f;
+    --late-bg: #3a231b;
     --note-bg: #3b3313;
     --note-text: #f5e19a;
-    --cat-1: #c48a62;
-    --cat-2: #7cc08b;
-    --cat-3: #ef9a62;
-    --cat-4: #a998f0;
-    --cat-5: #6cc4d4;
+    --cat-1: #c4e36a;
+    --cat-2: #ff9bd6;
+    --cat-3: #8fb5ff;
+    --cat-4: #ffab8f;
+    --cat-5: #b9a6ff;
     color-scheme: dark;
   }
 }
@@ -2757,5 +2773,703 @@ a.btn {
   }
   @page {
     margin: 4mm;
+  }
+}
+
+/* =====================================================================================
+   Soft theme: borders give way to gentle shadows, pastel tints mark states, ink buttons.
+   Layout and touch sizes above stay as they are; this layer only changes the look.
+   ===================================================================================== */
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+h1,
+h2,
+.ticket-head h2,
+.lane > header h2,
+.order-num,
+.ticket-total strong,
+.stat strong,
+.day-label strong {
+  font-family: var(--display);
+  letter-spacing: -0.02em;
+}
+
+/* Buttons: rounded, borderless, lift gently on hover. */
+.btn {
+  border: none;
+  border-radius: 999px;
+  transition:
+    background 0.2s,
+    box-shadow 0.2s var(--ease),
+    transform 0.15s var(--ease);
+}
+
+.btn-primary,
+.btn-go {
+  background: var(--brand);
+  color: var(--bg);
+  box-shadow: 0 6px 16px rgb(31 29 26 / 0.16);
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-go:hover:not(:disabled) {
+  background: var(--blue);
+  color: #fff;
+  box-shadow: 0 8px 20px rgb(63 127 242 / 0.3);
+}
+
+.btn-go.to-ready {
+  background: var(--lime);
+  color: #1f1d1a;
+  box-shadow: 0 6px 16px rgb(120 150 20 / 0.25);
+}
+
+.btn-go.to-ready:hover:not(:disabled) {
+  background: #cfe86a;
+  color: #1f1d1a;
+  box-shadow: 0 8px 20px rgb(120 150 20 / 0.32);
+}
+
+.btn-go.to-done {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.btn-ghost,
+.btn-danger,
+.icon-btn {
+  border: none;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-ghost:hover:not(:disabled),
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.btn-danger {
+  color: var(--late);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--late-bg);
+}
+
+.btn.armed {
+  background: var(--late);
+  color: #fff;
+  box-shadow: 0 6px 16px rgb(196 68 30 / 0.3);
+}
+
+.icon-btn {
+  border-radius: 999px;
+}
+
+button:disabled {
+  opacity: 0.3;
+}
+
+/* Inputs: soft filled fields, blue ring on focus. */
+.input,
+.login-card input,
+.search input,
+.stock-input,
+.input-money {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  transition:
+    background 0.2s,
+    box-shadow 0.2s,
+    border-color 0.2s;
+}
+
+.input:focus,
+.login-card input:focus,
+.search input:focus,
+.stock-input:focus,
+.input-money:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: var(--surface);
+  box-shadow: var(--ring);
+}
+
+.search input {
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Login ---------- */
+
+.login {
+  background:
+    radial-gradient(circle at 18% 22%, rgb(220 240 126 / 0.55), transparent 32%),
+    radial-gradient(circle at 82% 78%, rgb(255 196 234 / 0.5), transparent 34%),
+    radial-gradient(circle at 85% 15%, rgb(63 127 242 / 0.14), transparent 30%),
+    var(--bg);
+}
+
+.login-card {
+  border: none;
+  border-radius: 30px;
+  box-shadow: var(--shadow-lg);
+}
+
+.login-logo {
+  border-radius: 18px;
+  background: var(--lime);
+  color: #1f1d1a;
+}
+
+.demo-box {
+  border: none;
+  border-radius: 22px;
+  background: var(--surface-2);
+}
+
+/* ---------- Top bar: a light, floating bar ---------- */
+
+.topbar {
+  margin: 10px 12px 0;
+  padding: 8px 10px 8px 16px;
+  border-radius: 24px;
+  background: var(--bar);
+  box-shadow: var(--shadow);
+}
+
+.topbar-brand strong {
+  font-family: var(--display);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.nav {
+  gap: 4px;
+}
+
+.nav button {
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--bar-muted);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.nav button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.nav button[aria-selected="true"] {
+  background: var(--lime);
+  color: #1f1d1a;
+}
+
+.nav-badge {
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 700;
+}
+
+.nav-badge.warn {
+  background: var(--coral);
+  color: #fff;
+}
+
+.nav-badge.muted-badge {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.nav button[aria-selected="true"] .nav-badge.muted-badge {
+  background: rgb(31 29 26 / 0.1);
+  color: #1f1d1a;
+}
+
+.topbar .icon-btn {
+  border: none;
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.topbar .icon-btn:hover {
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.live {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--ready-bg);
+  color: var(--ready);
+  font-weight: 600;
+}
+
+.live i {
+  background: var(--ready);
+}
+
+.live.off {
+  background: var(--late-bg);
+  color: var(--late);
+}
+
+.live.off i {
+  background: var(--late);
+}
+
+.user-chip {
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.demo-banner {
+  margin: 8px 12px 0;
+  border-radius: 14px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/* ---------- Till ---------- */
+
+.categories button {
+  border: none;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.categories button:hover {
+  box-shadow: var(--shadow);
+}
+
+.categories button[aria-pressed="true"] {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.categories button[aria-pressed="true"] i {
+  background: var(--cat);
+}
+
+.tile {
+  border: none;
+  border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 0.15s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+
+/* The category colour as a small dot instead of a heavy top border. */
+.tile::before {
+  content: "";
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cat);
+  opacity: 0.85;
+}
+
+.tile:hover:not(:disabled) {
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+
+.tile:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.tile.in-ticket {
+  border: none;
+  background: color-mix(in srgb, var(--lime) 30%, var(--surface));
+  box-shadow: var(--shadow-sm), inset 0 0 0 2px var(--lime);
+}
+
+.tile .qty-badge {
+  top: -8px;
+  right: -6px;
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+
+.tile:disabled {
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.tile:disabled::before {
+  display: none;
+}
+
+.ticket {
+  border: none;
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.ticket-head h2 {
+  font-size: 21px;
+}
+
+.segmented {
+  border-radius: 999px;
+}
+
+.segmented button {
+  border-radius: 999px;
+}
+
+.segmented button[aria-checked="true"] {
+  box-shadow: var(--shadow-sm);
+}
+
+.table-chips button,
+.chip-choices button,
+.tender-grid button,
+.time-slots button,
+.choices button,
+.option-picks button,
+.station-filter button,
+.reward-opt {
+  border: none;
+  background: var(--surface-2);
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+
+.table-chips button:hover,
+.chip-choices button:hover,
+.tender-grid button:hover,
+.time-slots button:hover,
+.choices button:hover,
+.option-picks button:hover,
+.station-filter button:hover {
+  background: color-mix(in srgb, var(--text) 9%, var(--surface-2));
+}
+
+.table-chips button[aria-checked="true"],
+.chip-choices button[aria-checked="true"],
+.tender-grid button[aria-checked="true"],
+.time-slots button[aria-checked="true"],
+.choices button[aria-checked="true"],
+.option-picks button[aria-checked="true"],
+.station-filter button[aria-checked="true"] {
+  border: none;
+  background: var(--text);
+  color: var(--surface);
+}
+
+.choices button[aria-checked="true"] small,
+.table-chips button[aria-checked="true"] small,
+.option-picks button[aria-checked="true"] small {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.ticket-lines li {
+  border-bottom: 1px solid var(--border);
+}
+
+.ticket-lines li.flash {
+  animation: soft-flash 0.6s;
+}
+
+@keyframes soft-flash {
+  from {
+    background: color-mix(in srgb, var(--lime) 45%, transparent);
+  }
+}
+
+.qty button {
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.qty button:hover {
+  background: color-mix(in srgb, var(--text) 9%, var(--surface-2));
+}
+
+.qty .remove {
+  background: transparent;
+}
+
+.ticket-total strong {
+  font-size: 32px;
+}
+
+.member-card,
+.member-found {
+  border: none;
+  border-radius: 20px;
+  background: var(--surface-2);
+}
+
+/* ---------- Kitchen screen ---------- */
+
+.stat,
+.card-block,
+.staff-row,
+.booking,
+.table-card,
+.menu-row,
+.menu-group {
+  border-color: transparent;
+}
+
+.stat {
+  border: none;
+  border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.stat.late,
+.stat.warn {
+  border: none;
+}
+
+.lane {
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+
+.lane > header b {
+  box-shadow: var(--shadow-sm);
+}
+
+.lane-empty {
+  border: 2px dashed color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 22px;
+}
+
+.order {
+  border: none;
+  border-radius: 22px;
+  box-shadow: var(--shadow-sm), inset 4px 0 0 var(--lane, transparent);
+}
+
+.chip {
+  font-weight: 650;
+}
+
+.chip.table {
+  background: var(--new-bg);
+  color: var(--new);
+}
+
+.note {
+  border-radius: 14px;
+}
+
+.station-filter button {
+  border-radius: 999px;
+}
+
+/* ---------- Bookings ---------- */
+
+.booking {
+  border: none;
+  border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.table-card {
+  border: none;
+  border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.day-label,
+.day-label input {
+  border: none;
+}
+
+.day-label {
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Menu, report, staff ---------- */
+
+.menu-row {
+  border: none;
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.switch {
+  border: none;
+}
+
+.card-block {
+  border: none;
+  border-radius: 26px;
+  box-shadow: var(--shadow-sm);
+}
+
+.report-table th,
+.report-table td,
+.roles-table td {
+  border-color: var(--border);
+}
+
+.hour-row .bar {
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.hour-row .bar i {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--lime), #c4e35a);
+}
+
+.staff-row {
+  border: none;
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.stock-chip {
+  border: none;
+}
+
+/* ---------- Sheets (dialogs), toasts ---------- */
+
+.sheet {
+  border: none;
+  border-radius: 30px;
+  box-shadow: var(--shadow-lg);
+}
+
+.sheet::backdrop {
+  background: rgb(31 29 26 / 0.28);
+  backdrop-filter: blur(4px);
+}
+
+.sheet-foot {
+  border-top: 1px solid var(--border);
+}
+
+.toast {
+  border: none;
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+}
+
+.change-due {
+  border: none;
+  border-radius: 18px;
+}
+
+/* The printed/on-screen receipt stays paper-white. */
+.receipt {
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .btn,
+  .nav button {
+    transition: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .topbar {
+    margin: 0;
+    border-radius: 0 0 22px 22px;
+  }
+}
+
+.btn-pay {
+  background: var(--new-bg);
+  color: var(--new);
+  box-shadow: none;
+}
+
+.btn-pay:hover:not(:disabled) {
+  background: var(--blue);
+  color: #fff;
+}
+
+.user-chip b {
+  background: var(--pink);
+  color: #1f1d1a;
+}
+
+.user-chip b.staff {
+  background: var(--new-bg);
+  color: var(--new);
+}
+
+/* Availability switch: soft lime when on, light grey when off. */
+.switch {
+  background: var(--lime);
+  box-shadow: inset 0 1px 2px rgb(60 80 0 / 0.15);
+}
+
+.switch::after {
+  box-shadow: 0 1px 3px rgb(31 29 26 / 0.25);
+}
+
+.switch-btn[aria-checked="false"] .switch,
+.menu-row[aria-checked="false"] .switch {
+  background: color-mix(in srgb, var(--text) 14%, var(--surface-2));
+}
+
+/* Tablets: keep the floating bar on one line. */
+@media (max-width: 900px) {
+  .topbar {
+    gap: 8px;
+  }
+  .nav {
+    gap: 2px;
+  }
+  .nav button {
+    padding: 0 12px;
+  }
+  .live #live-text {
+    display: none;
+  }
+  /* Name stays in the chip's tooltip; the role badge is enough here. */
+  .user-chip {
+    font-size: 0;
+    gap: 0;
+  }
+  .user-chip b {
+    font-size: 11px;
+  }
+  .nav button {
+    padding: 0 10px;
   }
 }

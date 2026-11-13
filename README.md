@@ -89,6 +89,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Chinese and Malay questions work even in offline mode (Chinese text is searched in two-character pieces)
 
 **Staff desk** (`/desk`, each person logs in with their own username + PIN)
+- Same calm design as the customer site: a floating top bar, white cards on soft shadows, pastel status
+  colours (blue new, amber preparing, lime ready, coral late), ink main buttons; works in dark mode
 - **Till / POS**: menu grid by category, item search, **drink options** (size, milk, extra shot, iced...)
   with per-item notes, takeaway or dine-in by table
 - **Payments**: cash with quick amounts and change due, or card confirmed from the card machine;
