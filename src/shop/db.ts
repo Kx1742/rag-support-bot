@@ -142,6 +142,19 @@ const MIGRATIONS = [
   ALTER TABLE orders ADD COLUMN charges TEXT NOT NULL DEFAULT '[]';   -- [{id, name, percent, amount}], frozen at order time
   ALTER TABLE orders ADD COLUMN rounding INTEGER NOT NULL DEFAULT 0;  -- cash rounding adjustment in cents (e.g. -2)
   `,
+  // 7: what customers ask the chat assistant (masked, expires after 90 days)
+  `
+  CREATE TABLE chat_questions (
+    id        INTEGER PRIMARY KEY,
+    asked_at  TEXT NOT NULL,
+    question  TEXT NOT NULL,          -- phone numbers and emails already masked
+    topic     TEXT NOT NULL,          -- keywords, groups different wordings of one question
+    answered  INTEGER NOT NULL,
+    handled   INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX chat_questions_by_time ON chat_questions (asked_at);
+  CREATE INDEX chat_questions_by_topic ON chat_questions (topic, answered, handled);
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */

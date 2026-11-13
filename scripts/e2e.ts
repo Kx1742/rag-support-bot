@@ -197,6 +197,14 @@ try {
     assert(/change \$4\.75/.test(toast), `toast should mention the change: ${toast}`);
   });
 
+  await test("manager sees the questions the assistant couldn't answer", async () => {
+    await desk.run(`document.querySelector('[data-tab="report"]').click();`);
+    const top = await desk.waitFor<string>(`document.querySelector("#questions-list .q-row")?.innerText`, { what: "unanswered questions" });
+    assert(/baby changing table/i.test(top) && /4×/.test(top), `most-asked missing topic should be first: ${top}`);
+    const rate = await desk.run<string>(`return document.getElementById("questions-rate").innerText;`);
+    assert(/\d+% of \d+ questions answered/.test(rate), `answer rate should show: ${rate}`);
+  });
+
   await test("customer books a table and staff see it on the desk", async () => {
     await chat.run(`document.getElementById("book-btn").click();`);
     await chat.waitFor(`[...document.querySelectorAll(".booking-card .times button")].length > 0`, { what: "booking times" });

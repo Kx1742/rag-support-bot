@@ -1943,6 +1943,78 @@ async function loadReport() {
   if (!can("reports.view")) return;
   state.report = await api(`/report?date=${state.reportDate}`);
   renderReport();
+  loadQuestions().catch((err) => toast(err.message, { tone: "error" }));
+}
+
+// ---------- What customers asked that the assistant couldn't answer ----------
+
+state.questionDays = 30;
+
+async function loadQuestions() {
+  renderQuestions(await api(`/questions?days=${state.questionDays}`));
+}
+
+function renderQuestions(q) {
+  $("questions-rate").replaceChildren(
+    ...(q.total
+      ? [h("strong", {}, `${q.answerRate}%`), ` of ${q.total} question${q.total === 1 ? "" : "s"} answered in the last ${q.days} days`]
+      : [`No chat questions in the last ${q.days} days yet.`]),
+  );
+  $("questions-meter").style.width = `${q.answerRate ?? 0}%`;
+  $("questions-list").replaceChildren(
+    q.unanswered.length
+      ? h(
+          "ol",
+          { class: "q-list" },
+          ...q.unanswered.map((topic) =>
+            h(
+              "li",
+              { class: "q-row" },
+              h("span", { class: "q-count", title: "Times asked" }, `${topic.count}×`),
+              h("div", { class: "q-main" }, h("strong", {}, `“${topic.question}”`), h("span", { class: "muted" }, `Last asked ${timeAgo(topic.lastAsked)}`)),
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "btn btn-ghost btn-sm",
+                  title: "I've added this to the café's documents",
+                  onclick: async (e) => {
+                    e.currentTarget.disabled = true;
+                    try {
+                      await api("/questions/handled", { method: "POST", body: { key: topic.key } });
+                      toast(`Cleared “${topic.question}”`, { tone: "success" });
+                      await loadQuestions();
+                    } catch (err) {
+                      toast(err.message, { tone: "error" });
+                      e.currentTarget.disabled = false;
+                    }
+                  },
+                },
+                "Added",
+              ),
+            ),
+          ),
+        )
+      : h("p", { class: "empty-note" }, q.total ? "Nothing missing: the assistant answered every question." : "Questions will appear here as customers chat."),
+  );
+}
+
+for (const b of document.querySelectorAll("#questions-range button")) {
+  b.addEventListener("click", () => {
+    state.questionDays = Number(b.dataset.days);
+    for (const x of document.querySelectorAll("#questions-range button")) x.setAttribute("aria-checked", String(x === b));
+    loadQuestions().catch((err) => toast(err.message, { tone: "error" }));
+  });
+}
+
+/** "5 minutes ago", "yesterday", "3 days ago". */
+function timeAgo(iso) {
+  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+  const rtf = new Intl.RelativeTimeFormat(state.info?.locale ?? "en-US", { numeric: "auto" });
+  for (const [unit, size] of [["day", 86400], ["hour", 3600], ["minute", 60]]) {
+    if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit);
+  }
+  return rtf.format(0, "minute");
 }
 
 function renderReport() {

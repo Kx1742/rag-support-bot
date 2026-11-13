@@ -3473,3 +3473,109 @@ button:disabled {
     padding: 0 10px;
   }
 }
+
+/* ---------- Report: questions the assistant couldn't answer ---------- */
+
+.questions-block {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.questions-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.questions-rate {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.questions-rate strong {
+  color: var(--text);
+  font-family: var(--display);
+  font-size: 22px;
+}
+
+.questions-range {
+  grid-template-columns: repeat(3, auto);
+}
+
+.questions-range button {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.q-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--late-bg);
+  overflow: hidden;
+}
+
+.q-meter i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--lime), #c4e35a);
+  transition: width 0.5s var(--ease);
+}
+
+.q-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.q-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 18px;
+  background: var(--surface-2);
+}
+
+.q-count {
+  display: grid;
+  place-items: center;
+  min-width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.q-row:first-child .q-count {
+  background: var(--late-bg);
+  color: var(--late);
+}
+
+.q-main {
+  display: grid;
+  min-width: 0;
+}
+
+.q-main strong {
+  overflow-wrap: anywhere;
+}
+
+.q-main span {
+  font-size: 13px;
+}
+
+.q-help {
+  font-size: 13px;
+}

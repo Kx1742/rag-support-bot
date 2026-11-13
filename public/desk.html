@@ -230,6 +230,25 @@
           <h2 class="section-title">Refunds</h2>
           <div id="report-refunds"></div>
         </section>
+        <section class="card-block questions-block" id="questions-block">
+          <div class="questions-head">
+            <div>
+              <h2 class="section-title">What customers asked that the assistant couldn't answer</h2>
+              <p class="questions-rate" id="questions-rate"></p>
+            </div>
+            <div class="segmented questions-range" id="questions-range" role="radiogroup" aria-label="Period">
+              <button type="button" role="radio" data-days="7" aria-checked="false">7 days</button>
+              <button type="button" role="radio" data-days="30" aria-checked="true">30 days</button>
+              <button type="button" role="radio" data-days="90" aria-checked="false">90 days</button>
+            </div>
+          </div>
+          <div class="q-meter" aria-hidden="true"><i id="questions-meter"></i></div>
+          <div id="questions-list"></div>
+          <p class="muted q-help">
+            Add the answer to the café's documents, then tap <b>Added</b> to clear it from this list. Questions are anonymous:
+            phone numbers and emails are hidden, and everything is deleted after 90 days.
+          </p>
+        </section>
       </section>
 
       <!-- Staff accounts (managers) -->

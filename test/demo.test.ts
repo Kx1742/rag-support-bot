@@ -87,7 +87,7 @@ describe("demo mode over HTTP", async () => {
   const assistant: ChatAssistant = {
     tenant,
     async *askStream(): AsyncIterable<AnswerEvent> {
-      yield { type: "done", usedFallback: true };
+      yield { type: "done", usedFallback: true, answered: false };
     },
   };
   let base = "";

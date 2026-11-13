@@ -9,6 +9,9 @@ import type {
   ToolRunner,
 } from "../types.ts";
 import { buildSystemPrompt, fallbackAnswer } from "./prompt.ts";
+
+/** Start of the offline "chat model"'s reply when the best source doesn't match the question. */
+const NOT_FOUND_MARKER = "I couldn't find anything about that";
 import type { VectorStore } from "./vectorStore.ts";
 
 export interface AssistantOptions {
@@ -33,6 +36,8 @@ export interface Answer {
   sources: SourceRef[];
   /** True when nothing relevant was found and the LLM was not called. */
   usedFallback: boolean;
+  /** False when the assistant couldn't help (see the "done" event). */
+  answered: boolean;
 }
 
 export type AnswerEvent =
@@ -40,7 +45,11 @@ export type AnswerEvent =
   | { type: "delta"; text: string }
   /** Something happened through a tool, e.g. a booking was made. The UI can show a card. */
   | { type: "action"; name: string; data: unknown }
-  | { type: "done"; usedFallback: boolean };
+  /**
+   * answered: false when the assistant couldn't help (nothing relevant found, or it said "not sure,
+   * please contact…"). Used for the "questions we couldn't answer" report.
+   */
+  | { type: "done"; usedFallback: boolean; answered: boolean };
 
 /** Optional actions (like bookings) the assistant can take through function calling. */
 export interface AssistantTools {
@@ -83,6 +92,17 @@ export class Assistant {
     this.notices = deps.notices;
   }
 
+  /**
+   * The prompt tells the model to suggest the café's contact details when the sources don't have the
+   * answer, so an answer that hands over those details (email, phone) most likely didn't help.
+   */
+  private pointsToContact(text: string): boolean {
+    const contacts = this.tenant.fallbackContact.match(/[\w.+-]+@[\w.-]+|\+?\d[\d\s()-]{5,}\d/g) ?? [];
+    const flat = (v: string) => v.replace(/[\s()-]/g, "").toLowerCase();
+    const answer = flat(text);
+    return contacts.some((c) => answer.includes(flat(c)));
+  }
+
   /** True when the assistant can take actions such as bookings. */
   get canUseTools(): boolean {
     return !!this.tools;
@@ -92,12 +112,13 @@ export class Assistant {
     let text = "";
     let sources: SourceRef[] = [];
     let usedFallback = false;
+    let answered = false;
     for await (const event of this.askStream(question, history)) {
       if (event.type === "sources") sources = event.sources;
       else if (event.type === "delta") text += event.text;
-      else if (event.type === "done") usedFallback = event.usedFallback;
+      else if (event.type === "done") ({ usedFallback, answered } = event);
     }
-    return { text: text.trim(), sources, usedFallback };
+    return { text: text.trim(), sources, usedFallback, answered };
   }
 
   /** Yields sources first, then the answer piece by piece, then "done". */
@@ -130,23 +151,28 @@ export class Assistant {
         if (action) yield { type: "action", ...action };
       }
       yield { type: "delta", text };
-      yield { type: "done", usedFallback: false };
+      yield { type: "done", usedFallback: false, answered: (found.length > 0 || calls.length > 0) && !this.pointsToContact(text) };
       return;
     }
 
     if (found.length === 0) {
       yield { type: "delta", text: fallbackAnswer(this.tenant) };
-      yield { type: "done", usedFallback: true };
+      yield { type: "done", usedFallback: true, answered: false };
       return;
     }
 
     const request = { system: buildSystemPrompt(this.tenant, found), messages };
+    let answer = "";
     if (this.chat.stream) {
-      for await (const text of this.chat.stream(request)) yield { type: "delta", text };
+      for await (const text of this.chat.stream(request)) {
+        answer += text;
+        yield { type: "delta", text };
+      }
     } else {
-      yield { type: "delta", text: await this.chat.generate(request) };
+      answer = await this.chat.generate(request);
+      yield { type: "delta", text: answer };
     }
-    yield { type: "done", usedFallback: false };
+    yield { type: "done", usedFallback: false, answered: !this.pointsToContact(answer) && !answer.includes(NOT_FOUND_MARKER) };
   }
 
   /**

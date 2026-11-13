@@ -30,7 +30,9 @@ export function keywords(text: string): string[] {
 
 /** Very small stemmer: "opening" -> "open", "hours" -> "hour", "catered" -> "cater". */
 export function stem(word: string): string {
-  if (word.length <= 4) return word;
+  // Short plurals too: "dogs" -> "dog", "kids" -> "kid" (but not "less", "plus").
+  if (word.length === 4) return /[^su]s$/.test(word) ? word.slice(0, -1) : word;
+  if (word.length < 4) return word;
   return word.replace(/(ings|ing|ies|ed|es|s)$/, (suffix) => (suffix === "ies" ? "y" : ""));
 }
 

@@ -1,0 +1,22 @@
+{
+  "minScore": 90,
+  "cases": [
+    { "question": "Do you have oat milk?", "source": "menu.md", "expect": "oat" },
+    { "question": "How much is a flat white?", "source": "menu.md", "expect": "4\\.50" },
+    { "question": "Is the avocado toast vegan?", "source": "menu.md", "expect": "vegan" },
+    { "question": "Do your pastries contain nuts?", "source": "menu.md", "expect": "nut" },
+    { "question": "What time do you open on Sunday?", "source": "hours-and-location.md", "expect": "9:00" },
+    { "question": "Is there parking?", "source": "hours-and-location.md", "expect": "parking" },
+    { "question": "Can I bring my dog?", "source": "hours-and-location.md", "expect": "dog" },
+    { "question": "Do you have Wi-Fi for laptops?", "source": "hours-and-location.md", "expect": "wi-fi" },
+    { "question": "How many points do I need for a free drink?", "source": "loyalty-program.md", "expect": "100" },
+    { "question": "Do Byte Points expire?", "source": "loyalty-program.md", "expect": "12 months" },
+    { "question": "Can I get a refund on a gift card?", "source": "refund-policy.md", "expect": "cannot be refunded" },
+    { "question": "My drink was made wrong, can I get a refund?", "source": "refund-policy.md", "expect": "remake" },
+    { "question": "Do you cater for 30 people?", "source": "catering.md", "expect": "10 to 150|package|order" },
+    { "question": "How much does catering delivery cost?", "source": "catering.md", "expect": "delivery" },
+    { "question": "How do I order ahead for pickup?", "source": "order-ahead.md", "expect": "order ahead" },
+    { "question": "What is the capital of France?", "unanswerable": true },
+    { "question": "Can you help with my quantum physics homework?", "unanswerable": true }
+  ]
+}

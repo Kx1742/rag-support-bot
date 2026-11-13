@@ -172,7 +172,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       return;
     }
     if (action === "chat" && req.method === "POST") {
-      await handleChat(req, res, assistant, deps);
+      await handleChat(req, res, assistant, deps, await getShop(tenantId));
       return;
     }
 
@@ -326,7 +326,7 @@ function takeRateLimit(req: IncomingMessage, res: ServerResponse, deps: ServerDe
   }
 }
 
-async function handleChat(req: IncomingMessage, res: ServerResponse, assistant: ChatAssistant, deps: ServerDeps) {
+async function handleChat(req: IncomingMessage, res: ServerResponse, assistant: ChatAssistant, deps: ServerDeps, shop: Shop | null = null) {
   takeRateLimit(req, res, deps);
   const { message, history } = parseChatBody(await readObject(req));
   if (!deps.dailyCap.take()) {
@@ -341,6 +341,14 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, assistant: 
     for await (const event of assistant.askStream(message, history)) {
       if (closed) break; // visitor left: stop sending
       sendSse(res, event.type, event);
+      // Remember what was asked (masked) and whether it was answered, for the owner's report.
+      if (event.type === "done" && shop) {
+        try {
+          shop.questions.record(message, event.answered);
+        } catch (err) {
+          deps.log?.(`Could not record a chat question: ${(err as Error).message}`);
+        }
+      }
     }
   } catch (err) {
     (deps.log ?? console.log)(`Chat error for ${assistant.tenant.id}: ${(err as Error).message}`);

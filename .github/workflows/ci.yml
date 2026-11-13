@@ -17,6 +17,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Answer quality: each café's test questions must score at least its minScore.
+      - run: npm run eval
 
   # Real user journeys in headless Chrome (preinstalled on GitHub's Ubuntu runners).
   e2e:

@@ -106,6 +106,29 @@ export async function seedDemo(shop: Shop): Promise<void> {
     }),
   );
 
+  // What customers asked the chat assistant over the past week, for the owner's report.
+  const hoursAgo = (h: number) => new Date(shop.now().getTime() - h * 3_600_000);
+  const asked: [string, boolean, number][] = [
+    ["Is there a baby changing table?", false, 2],
+    ["Do you have a baby changing table?", false, 20],
+    ["Is there a baby changing table?", false, 70],
+    ["Baby changing table?", false, 120],
+    ["Is there a kids menu?", false, 5],
+    ["Do you have a kids menu?", false, 50],
+    ["Is there a power socket for laptops?", false, 30],
+    ["What time do you open on Sunday?", true, 1],
+    ["Do you have oat milk?", true, 3],
+    ["How does the loyalty program work?", true, 8],
+    ["Is your food halal?", true, 9],
+    ["What time do you close today?", true, 12],
+    ["Can I pay by card?", true, 26],
+    ["Do you take bookings for 6 people?", true, 40],
+    ["Where are you located?", true, 60],
+    ["Do you have vegan options?", true, 90],
+    ["What time do you open tomorrow?", true, 100],
+  ];
+  for (const [question, answered, h] of asked) tryIt(() => shop.questions.record(question, answered, hoursAgo(h)));
+
   // Bookings: a couple later today (one already seated), a few tomorrow.
   const { date: today, minutes: now } = shop.bookings.today();
   const book = (date: string, pick: (times: string[]) => string | undefined, partySize: number, name: string, phone: string, notes = "") =>

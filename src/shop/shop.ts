@@ -9,6 +9,7 @@ import { openDatabase, transaction } from "./db.ts";
 import { LoyaltyService } from "./loyalty.ts";
 import { MenuService } from "./menu.ts";
 import { OrderService } from "./orders.ts";
+import { QuestionLog } from "./questions.ts";
 import { StaffService } from "./staff.ts";
 
 export type ShopChange = { kind: "booking" | "order" | "menu"; id: string | number; action: "created" | "updated" };
@@ -25,6 +26,8 @@ export class Shop {
   readonly orders: OrderService;
   readonly staff: StaffService;
   readonly loyalty: LoyaltyService;
+  /** What customers ask the chat assistant, and whether it could answer. */
+  readonly questions: QuestionLog;
   readonly events = new EventEmitter();
   private readonly db: DatabaseSync;
   private readonly clock?: () => Date;
@@ -53,6 +56,7 @@ export class Shop {
       onStockChange: (itemId) => emit("menu")(itemId),
     });
     this.staff = new StaffService({ db: this.db, now });
+    this.questions = new QuestionLog({ db: this.db, now });
     this.menu.sync(this.config.menu);
   }
 
@@ -69,6 +73,7 @@ export class Shop {
         DELETE FROM loyalty_members;
         DELETE FROM bookings;
         DELETE FROM staff;
+        DELETE FROM chat_questions;
         DELETE FROM menu_items WHERE origin = 'desk';
         UPDATE menu_items SET edited = 0, stock = NULL, available = 1;
       `);

@@ -150,6 +150,16 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
       need("reports.view");
       return ok(res, shop.orders.report(date));
 
+    // ----- what customers asked the chat assistant -----
+    case "GET /questions":
+      need("reports.view");
+      return ok(res, shop.questions.summary(Number(url.searchParams.get("days") ?? 30)));
+    case "POST /questions/handled": {
+      need("reports.view");
+      const b = await readObject(req);
+      return ok(res, { handled: shop.questions.markHandled(String(b.key ?? "")) });
+    }
+
     // ----- staff accounts -----
     case "GET /staff":
       need("staff.manage");

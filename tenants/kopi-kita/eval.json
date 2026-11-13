@@ -1,0 +1,21 @@
+{
+  "minScore": 90,
+  "cases": [
+    { "question": "Is your food halal?", "source": "halal-and-dietary.md", "expect": "pork-free" },
+    { "question": "Do you have vegetarian food?", "source": "halal-and-dietary.md", "expect": "vegetarian" },
+    { "question": "How much is nasi lemak?", "source": "menu.md", "expect": "6\\.50" },
+    { "question": "Can I get my kopi less sweet?", "source": "menu.md", "expect": "kurang manis" },
+    { "question": "Do you charge SST and service charge?", "source": "payments-and-charges.md", "expect": "6%" },
+    { "question": "Is there a service charge for takeaway?", "source": "payments-and-charges.md", "expect": "takeaway" },
+    { "question": "Can I pay with DuitNow QR?", "source": "payments-and-charges.md", "expect": "DuitNow" },
+    { "question": "Why was my cash payment rounded?", "source": "payments-and-charges.md", "expect": "5 sen" },
+    { "question": "How do Kopi Points work?", "source": "kopi-points-and-order-ahead.md", "expect": "point" },
+    { "question": "Can I smoke at the outdoor tables?", "source": "about-and-hours.md", "expect": "smoking" },
+    { "question": "你们几点开门？", "source": "faq-chinese.md", "expect": "7点" },
+    { "question": "有清真认证吗？", "source": "faq-chinese.md", "expect": "JAKIM" },
+    { "question": "Boleh bayar guna DuitNow?", "source": "faq-malay.md", "expect": "DuitNow" },
+    { "question": "Pukul berapa kedai buka?", "source": "faq-malay.md", "expect": "7:00" },
+    { "question": "What is the capital of France?", "unanswerable": true },
+    { "question": "Do you sell car insurance?", "unanswerable": true }
+  ]
+}

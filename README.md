@@ -113,6 +113,10 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - **Refunds** (managers): with a reason; paid orders can't simply be cancelled
 - **End-of-day report** (managers): sales, cash vs card, unpaid, refunds, best sellers, sales by hour, CSV export
 - **Staff accounts** (managers): add people, change roles, reset PINs, deactivate
+- **What customers asked that the assistant couldn't answer** (managers, in the report): the answer rate
+  for the last 7/30/90 days and the missing topics ranked by how often they're asked (different wordings
+  are grouped), so the owner knows exactly what to add to their documents; "Added" clears a topic.
+  Anonymous: phone numbers and emails are masked before saving, and questions are deleted after 90 days
 
 **Engineering**
 - Zero runtime dependencies: Node's built-in `node:http`, `node:sqlite` and `fetch`
@@ -123,8 +127,14 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
-- 161 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
-- 12 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, a Malaysian dine-in order with SST paid by DuitNow QR, switching language, phone layout); they run on every push, with failure screenshots saved
+- 171 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- **Answer-quality tests** (`npm run eval`, also in CI): each café has a set of real questions in
+  `tenants/<id>/eval.json` with the document that should answer them, a phrase the answer must contain,
+  and questions the assistant must *not* pretend to answer. The script reports the score, how often the
+  right document came first and in the top 3, and fails below the café's minimum. It already caught a
+  bug: offline search didn't match "dog" to "Dogs" (short plurals weren't stemmed). `--live` runs it
+  against the real AI
+- 13 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, a Malaysian dine-in order with SST paid by DuitNow QR, the unanswered-questions report, switching language, phone layout); they run on every push, with failure screenshots saved
 
 ## How it works
 
@@ -218,6 +228,8 @@ them. Unexpected errors are not.
 | Demo data created through the normal services | The demo follows the same rules as real use, and seeding tests those rules too. |
 | `VACUUM INTO` for backups | A consistent snapshot while the app keeps running, with no extra tools. |
 | Money formatted in the shop's locale, not the browser's | A US café shows "$4.75" on every till, not "US$4.75" on a till set to another region. |
+| "Unanswered" = nothing relevant found, or the answer hands over the café's contact details | The prompt tells the AI to give the contact details when the documents don't have the answer, so this catches polite "I'm not sure" replies without a second AI call. |
+| Chat questions stored masked, unlinked to anyone, deleted after 90 days | Owners get the insight; customers' phone numbers and emails never land in the database. |
 | Request logs keep the path only | Query strings can contain phone numbers; logs shouldn't. |
 | One receipt builder on the server for the till and the customer | Printed and digital receipts can't disagree. |
 | E2E tests run their own server on a test copy of the café that is open all day, at local midday | Results don't depend on what time CI happens to run. |
@@ -250,8 +262,9 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 161 unit and API tests
-npm run e2e                   # 12 browser tests (needs Edge or Chrome)
+npm test                      # 171 unit and API tests
+npm run eval                  # answer-quality score per café (add -- --live to use the AI)
+npm run e2e                   # 13 browser tests (needs Edge or Chrome)
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
@@ -364,6 +377,7 @@ Taxes and payments, e.g. for Malaysia (see [`tenants/kopi-kita/shop.json`](tenan
 - [x] Customer chat and pickup screen in English, 中文 and Bahasa Melayu
 - [x] Second demo café in Malaysia: RM, SST, service charge, 5-sen rounding, DuitNow QR
 - [ ] Put the live demo URL in this README
+- [x] Report of questions the assistant couldn't answer; answer-quality tests in CI
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 
 ## Privacy note

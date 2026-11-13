@@ -98,7 +98,7 @@ describe("HTTP server", () => {
       }
       yield { type: "delta", text: "We open " };
       yield { type: "delta", text: "at 9 [1]." };
-      yield { type: "done", usedFallback: false };
+      yield { type: "done", usedFallback: false, answered: true };
     },
   };
 
