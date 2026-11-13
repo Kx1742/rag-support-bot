@@ -76,35 +76,35 @@ taxes and payment methods. The demo runs two very different cafés from the same
 
 ```mermaid
 flowchart LR
-    subgraph Customers
-        C[Chat page<br/>EN · 中文 · BM]
-        P[Pickup screen]
+    C["Chat page (EN, ZH, BM)"]
+    P["Pickup screen"]
+    D["Staff desk: till, kitchen, bookings, menu, report"]
+    subgraph Server["Node server, no dependencies"]
+        API["HTTP API: rate limits, CSP, sessions"]
+        A["Assistant"]
+        R["Retrieval: chunks, embeddings, search"]
+        T["Booking tools"]
+        S["Shop services: orders, bookings, menu, loyalty, questions, team answers"]
+        DB[("SQLite, one file per cafe")]
+        E["Live events"]
     end
-    subgraph Staff
-        D[Staff desk<br/>till · kitchen · bookings<br/>menu · report]
-    end
-    subgraph Server["Node server (no dependencies)"]
-        API[HTTP API<br/>rate limits · CSP · sessions]
-        A[Assistant]
-        R[Retrieval<br/>chunks · embeddings · search]
-        T[Tools<br/>check availability · book · cancel]
-        S[Shop services<br/>orders · bookings · menu · loyalty<br/>questions · team answers]
-        DB[(SQLite<br/>one file per café)]
-        E[Live events]
-    end
-    G[Gemini<br/>embeddings + chat]
+    G["Gemini: embeddings and chat"]
 
     C -->|chat over SSE| API
     D -->|cookie session| API
-    API --> A --> R
+    API --> A
+    A --> R
     A <-->|function calling| G
     R -.->|embed| G
-    A --> T --> S
-    API --> S --> DB
-    S --> E -->|SSE| D
+    A --> T
+    T --> S
+    API --> S
+    S --> DB
+    S --> E
+    E -->|SSE| D
     E -->|SSE| P
     E -->|order status| C
-    S -.->|team answers become a document| R
+    S -.->|team answers| R
 ```
 
 ### How a question is answered (RAG)
