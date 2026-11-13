@@ -18,7 +18,8 @@
     "start:demo": "node src/server/main.ts --demo",
     "screenshots": "node scripts/screenshots.ts",
     "e2e": "node scripts/e2e.ts",
-    "eval": "node scripts/eval.ts"
+    "eval": "node scripts/eval.ts",
+    "demo-tour": "node scripts/demo-tour.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

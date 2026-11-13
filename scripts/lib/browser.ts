@@ -33,6 +33,8 @@ export interface Page {
   /** Polls a JS expression until it's truthy; returns its value. */
   waitFor<T = unknown>(expression: string, opts?: { timeoutMs?: number; what?: string }): Promise<T>;
   screenshot(path: string): Promise<void>;
+  /** The visible page as a PNG. */
+  capture(): Promise<Buffer>;
   setSize(width: number, height: number, mobile?: boolean): Promise<void>;
   /** Uncaught JS errors seen on this page so far. */
   errors: string[];
@@ -177,6 +179,10 @@ async function connectPage(wsUrl: string, closeTab: () => Promise<unknown>): Pro
     async screenshot(path) {
       const { data } = await send("Page.captureScreenshot", { format: "png" });
       writeFileSync(path, Buffer.from(data, "base64"));
+    },
+    async capture() {
+      const { data } = await send("Page.captureScreenshot", { format: "png" });
+      return Buffer.from(data, "base64");
     },
     async setSize(width, height, mobile = false) {
       await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: mobile ? 2 : 1, mobile });

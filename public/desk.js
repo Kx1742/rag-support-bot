@@ -174,7 +174,7 @@ function renderDemoLogin(demo) {
           },
         },
         label[a.role] ?? a.username,
-        h("small", { class: "muted" }, ` · ${a.username} / PIN ${a.pin}`),
+        h("small", { class: "muted" }, `${a.username} · PIN ${a.pin}`),
       ),
     ),
   );

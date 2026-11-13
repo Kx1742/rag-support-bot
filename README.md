@@ -1,20 +1,41 @@
 # RAG Support Bot + Shop Desk
 
 [![CI](https://github.com/Kx1742/rag-support-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Kx1742/rag-support-bot/actions/workflows/ci.yml)
+![Node 23.6+](https://img.shields.io/badge/node-23.6%2B-3c873a)
+![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-A customer-support chatbot for small businesses that **answers questions from the business's own
-documents** and **books tables by chatting**, plus a **staff desk** with a till (POS), a kitchen
-order queue, a bookings list and menu controls, all updating live.
+**An AI support assistant and a complete café system in one app.** Customers chat with the café's assistant,
+which answers from the café's own documents (with sources), books tables and takes orders. Staff run the
+till, kitchen screens and bookings on a live desk. Owners see what the assistant couldn't answer and teach
+it new answers in seconds. Built with TypeScript on Node's standard library alone.
 
-- **Customers** chat on the website: "Do you have oat milk?", "Table for 4 on Saturday at 10?"
-- **The AI** (Google Gemini) answers from the café's documents with citations, and checks availability
-  and makes bookings through function calling, using the shop's real booking rules
-- **Staff** see new bookings appear instantly on the desk, ring up orders with drink options,
-  take cash or card payment, and move orders through New → Preparing → Ready
-- **Managers** also refund orders, see the end-of-day sales report, and manage staff accounts
+**Live demo:** _coming soon_ <!-- TODO: paste the Render URL here after deploying -->
 
-It's multi-tenant: each business is a folder with its own documents, menu, tables, opening hours,
-currency, taxes and payment methods. The demo runs two very different cafés from the same code:
+![Animated tour: a customer asks a question and orders ahead, the order appears on the kitchen screen, staff mark it ready, the pickup screen calls the number, the till, the owner's report of unanswered questions, teaching the assistant an answer, and the Malaysian café in Chinese](docs/demo.png)
+
+<sub>Recorded automatically with `npm run demo-tour` (headless Edge/Chrome, saved as an animated PNG).</sub>
+
+**Try it on your machine in a minute** (no API key needed; it runs in offline mode):
+
+```bash
+npm install
+npm run start:demo
+```
+
+Then open the [chat](http://localhost:3000), the [staff desk](http://localhost:3000/desk) (tap **Try as Manager**)
+and the [pickup screen](http://localhost:3000/display).
+
+## What it does
+
+| For | What they get |
+|---|---|
+| **Customers** | Answers with sources in English, 中文 or Bahasa Melayu · book or cancel a table by chatting · order ahead and follow the order live · loyalty points · digital receipts |
+| **Staff** | A till with drink options, cash/card/DuitNow QR · kitchen and bar screens with timers · bookings with a live table map · a pickup screen for the counter · everything updates live |
+| **Owners** | End-of-day report (with SST collected) · menu, prices and stock · staff accounts with roles · **what the assistant couldn't answer, and "Answer it" to teach it** |
+
+It's multi-tenant: each business is a folder with its own documents, menu, tables, hours, currency,
+taxes and payment methods. The demo runs two very different cafés from the same code:
 
 | | **Bean & Byte Café** | **Kopi Kita** (`/?tenant=kopi-kita`) |
 |---|---|---|
@@ -23,13 +44,87 @@ currency, taxes and payment methods. The demo runs two very different cafés fro
 | Tax | None | 6% SST on everything, 10% service charge for dine-in only |
 | Payments | Cash, card | Cash, card, **DuitNow QR** |
 | Documents | English | English, 中文 and Bahasa Melayu |
-| Menu | Lattes with size and milk options | Kopi, teh tarik (hot/iced, kurang manis/kosong), nasi lemak with add-ons, kuih |
 
 > Both businesses are fictional. Their documents and menus are made up for this project.
 
-**Live demo:** _coming soon_ <!-- TODO: paste the Render URL here after deploying -->
-In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager**. Switch café with the
-**Try Kopi Kita** / **Try Bean & Byte Café** link in the chat. The data resets every night.
+## Engineering highlights
+
+- **Retrieval-augmented answers with citations.** Documents are chunked by heading and embedded; each
+  question is searched alone and together with the previous one (so follow-ups work); the AI may only use
+  the numbered sources, and document text is fenced off as data (basic prompt-injection defence).
+- **Tool use with real business rules.** Gemini books tables through function calling, but availability,
+  table sizes, notice periods and per-phone limits are enforced by our code, and it must confirm before booking.
+- **Answer quality is measured, not guessed.** Each café has a test set (`tenants/<id>/eval.json`) scored in
+  CI: right source in the top 3, required facts in the answer, and refusing questions it can't answer.
+  It caught a real bug: offline search didn't match "dog" to "Dogs".
+- **A closed feedback loop.** Questions the assistant couldn't answer are logged (masked, deleted after 90
+  days) and grouped for the owner; an answer typed on the desk is indexed straight away, reusing embeddings
+  for unchanged text, and the new assistant is swapped in without interrupting chats.
+- **Money that adds up.** Prices always come from the server, options are frozen onto each order line,
+  orders are idempotent, stock is taken in the same transaction as the order, SST compounds on the service
+  charge, and 5-sen cash rounding happens at payment, as at a real Malaysian till.
+- **Security by default.** Permissions checked on every request, scrypt-hashed PINs with lockout,
+  SameSite=Strict cookies, a strict Content-Security-Policy with no `innerHTML`, unguessable order-tracking
+  tokens, and nothing personal in logs.
+- **Zero runtime dependencies.** `node:http`, `node:sqlite` (one database per business), built-in `fetch`
+  and WebSocket; TypeScript runs natively with no build step. Even the browser-test driver and this README's
+  animation encoder are small in-repo modules.
+- **Tested like a product.** 178 unit and API tests, 14 end-to-end browser journeys across several tabs
+  (customer, kitchen, pickup screen, owner), and the answer-quality eval, all on every push.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Customers
+        C[Chat page<br/>EN · 中文 · BM]
+        P[Pickup screen]
+    end
+    subgraph Staff
+        D[Staff desk<br/>till · kitchen · bookings<br/>menu · report]
+    end
+    subgraph Server["Node server (no dependencies)"]
+        API[HTTP API<br/>rate limits · CSP · sessions]
+        A[Assistant]
+        R[Retrieval<br/>chunks · embeddings · search]
+        T[Tools<br/>check availability · book · cancel]
+        S[Shop services<br/>orders · bookings · menu · loyalty<br/>questions · team answers]
+        DB[(SQLite<br/>one file per café)]
+        E[Live events]
+    end
+    G[Gemini<br/>embeddings + chat]
+
+    C -->|chat over SSE| API
+    D -->|cookie session| API
+    API --> A --> R
+    A <-->|function calling| G
+    R -.->|embed| G
+    A --> T --> S
+    API --> S --> DB
+    S --> E -->|SSE| D
+    E -->|SSE| P
+    E -->|order status| C
+    S -.->|team answers become a document| R
+```
+
+### How a question is answered (RAG)
+1. Documents are split by Markdown heading into chunks, embedded with `gemini-embedding-001`, and saved.
+2. Each question is searched on its own **and** with the previous question (for follow-ups),
+   keeping each chunk's best score.
+3. Gemini answers using only the numbered sources and cites them. With no relevant sources
+   and no tools, the bot gives the contact details instead of guessing.
+
+### How booking by chat works (function calling)
+1. The system prompt gives Gemini today's date, a 14-day calendar (models are bad at date maths)
+   and the booking rules.
+2. Gemini calls `check_availability`. Our code runs the real rules and returns free times or the
+   closest alternatives.
+3. Gemini summarises the details and asks the customer to confirm. Only after a clear "yes" does
+   it call `create_booking`.
+4. The chat shows a confirmation card with the reference, and the desk announces the new booking live.
+
+Rule violations ("we seat up to 6") are returned to the model as tool results so it can explain
+them. Unexpected errors are not.
 
 ## Screenshots
 
@@ -47,7 +142,52 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 
 <sub>Captured from the public demo with `npm run screenshots`, which drives a headless Edge/Chrome, so they're easy to refresh after design changes.</sub>
 
-## Features
+## Getting started
+
+Requires **Node.js 23.6+**, which runs TypeScript directly with no build step.
+
+```bash
+npm install
+cp .env.example .env    # set STAFF_PASSWORD (8+ chars); add GEMINI_API_KEY for AI answers
+npm start
+```
+
+- Customer chat: http://localhost:3000
+- Staff desk: http://localhost:3000/desk. First log in with business ID `bean-and-byte`, username `owner`
+  and the `STAFF_PASSWORD` from `.env`, then add your team on the **Staff** tab
+
+Without `GEMINI_API_KEY` the chat runs in **offline mode**: keyword search, no AI-written answers,
+and bookings through the form only. Get a free key at https://aistudio.google.com/apikey.
+
+Other commands:
+
+```bash
+npm run dev                   # restart on file changes
+npm run chat -- bean-and-byte # chat in the terminal
+npm test                      # 178 unit and API tests
+npm run eval                  # answer-quality score per café (add -- --live to use the AI)
+npm run e2e                   # 14 browser tests (needs Edge or Chrome)
+npm run typecheck
+npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
+npm run demo-tour             # re-record the animated tour at the top of this README
+```
+
+### Public demo mode
+
+```bash
+npm run start:demo        # or set DEMO_MODE=1
+```
+
+- Seeds a believable shift: orders in every kitchen stage, bookings, a loyalty member with points, stock counts
+- The desk login shows one-tap **demo-barista / 2580** and **demo-manager / 1357** logins
+- Data resets every night at `DEMO_RESET_HOUR` (default 04:00, shop time)
+- The shared demo accounts can't be changed or deactivated, so one visitor can't lock out the rest
+  (visitors can still try staff management on accounts they add themselves)
+
+## Reference
+
+<details>
+<summary><b>All features</b></summary>
 
 **Customer chat** (`/`)
 - **Calm, friendly design**: cream background, white panels on soft shadows (no hard outlines), pastel
@@ -139,52 +279,10 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
   against the real AI
 - 14 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, a Malaysian dine-in order with SST paid by DuitNow QR, the unanswered-questions report, answering a question on the desk and the chat using it at once, switching language, phone layout); they run on every push, with failure screenshots saved
 
-## How it works
+</details>
 
-```mermaid
-flowchart LR
-    C[Customer chat page]
-    D[Staff desk: till, orders, bookings, menu]
-    subgraph Server["Node server"]
-        API[HTTP API + rate limits]
-        A[Assistant]
-        R[RAG: chunk, embed, search]
-        T[Booking tools]
-        S[(Shop: SQLite per business)]
-        E[Live events]
-    end
-    G[Gemini API]
-
-    C -->|chat over SSE, booking form| API
-    D -->|login cookie| API
-    API --> A
-    API --> S
-    A --> R
-    A <-->|function calling| G
-    A --> T --> S
-    S --> E -->|SSE| D
-```
-
-### Answering questions (RAG)
-1. Documents are split by Markdown heading into chunks, embedded with `gemini-embedding-001`, and saved.
-2. Each question is searched on its own **and** with the previous question (for follow-ups),
-   keeping each chunk's best score.
-3. Gemini answers using only the numbered sources and cites them. With no relevant sources
-   and no tools, the bot gives the contact details instead of guessing.
-
-### Booking by chat (function calling)
-1. The system prompt gives Gemini today's date, a 14-day calendar (models are bad at date maths)
-   and the booking rules.
-2. Gemini calls `check_availability`. Our code runs the real rules and returns free times or the
-   closest alternatives.
-3. Gemini summarises the details and asks the customer to confirm. Only after a clear "yes" does
-   it call `create_booking`.
-4. The chat shows a confirmation card with the reference, and the desk announces the new booking live.
-
-Rule violations ("we seat up to 6") are returned to the model as tool results so it can explain
-them. Unexpected errors are not.
-
-## Roles and permissions
+<details>
+<summary><b>Roles and permissions</b></summary>
 
 | | Customer | Staff | Manager |
 |---|:-:|:-:|:-:|
@@ -207,7 +305,10 @@ them. Unexpected errors are not.
   or deactivation signs that person out everywhere.
 - Every order records who rang it up, who took payment and who refunded it.
 
-## Design decisions
+</details>
+
+<details>
+<summary><b>Design decisions (and why)</b></summary>
 
 | Decision | Why |
 |---|---|
@@ -245,46 +346,35 @@ them. Unexpected errors are not.
 | Customer pages translated in the browser from one small file; café content left as written | Adding a language is one dictionary; menus and documents stay exactly as the café wrote them. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
-## Getting started
+</details>
 
-Requires **Node.js 23.6+**, which runs TypeScript directly with no build step.
+<details>
+<summary><b>HTTP API</b></summary>
 
-```bash
-npm install
-cp .env.example .env    # set STAFF_PASSWORD (8+ chars); add GEMINI_API_KEY for AI answers
-npm start
-```
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/tenants/:id` | Public business info |
+| `POST` | `/api/tenants/:id/chat` | Chat. Body `{ message, history }`; responds with an SSE stream (`sources`, `action`, `delta`, `done`) |
+| `GET` | `/api/tenants/:id/availability?date=&partySize=` | Free booking times |
+| `GET` | `/api/tenants/:id/pickup`, `.../pickup/events` | Pickup screen numbers and live updates (public) |
+| `GET` | `/api/tenants/:id/menu` | Public menu and today's pickup times |
+| `POST` | `/api/tenants/:id/orders` | Order ahead: `{ name, phone, pickupTime, items, clientRef? }`; returns a `trackingToken` |
+| `GET` | `/api/tenants/:id/orders/track?token=`, `.../track/events?token=` | The customer's order status, and live updates (SSE) |
+| `POST` | `/api/tenants/:id/loyalty` | Points balance: `{ phone }` |
+| `POST` | `/api/tenants/:id/bookings` | Book a table: `{ date, time, partySize, name, phone, notes? }` |
+| `POST` | `/api/tenants/:id/bookings/lookup`, `.../cancel` | Customer: `{ reference, phone }` |
+| `POST` | `/api/desk/login`, `/api/desk/logout` | Desk session (cookie): `{ tenantId, username, pin }` |
+| `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue; POST takes `items[].options`, `clientRef`, optional `payment` |
+| `POST` | `/api/desk/orders/:id/pay`, `/api/desk/orders/:id/refund` | Take payment `{ method, tendered? }`; refund `{ reason }` (manager) |
+| `GET` | `/api/desk/report?date=` | End-of-day report (manager) |
+| `GET` | `/api/desk/orders/:id/receipt` | Receipt data for printing |
+| `GET`, `POST` | `/api/desk/loyalty?phone=`, `/api/desk/loyalty` | Look up or join a member; orders take `memberId` and `rewardId` |
+| `GET`, `POST`, `PATCH` | `/api/desk/staff`, `/api/desk/staff/:id` | Staff accounts (manager) |
+| `GET`, `POST`, `PATCH` | `/api/desk/bookings`, `/api/desk/bookings/:id` | Bookings by day, status changes |
+| `GET`, `POST`, `PATCH` | `/api/desk/menu`, `/api/desk/menu/:id` | Menu; PATCH `{ available }` or `{ stock }` (staff), item fields or `{ hidden }` (manager) |
+| `GET` | `/api/desk/events` | Live change events (SSE) |
 
-- Customer chat: http://localhost:3000
-- Staff desk: http://localhost:3000/desk. First log in with business ID `bean-and-byte`, username `owner`
-  and the `STAFF_PASSWORD` from `.env`, then add your team on the **Staff** tab
-
-Without `GEMINI_API_KEY` the chat runs in **offline mode**: keyword search, no AI-written answers,
-and bookings through the form only. Get a free key at https://aistudio.google.com/apikey.
-
-Other commands:
-
-```bash
-npm run dev                   # restart on file changes
-npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 178 unit and API tests
-npm run eval                  # answer-quality score per café (add -- --live to use the AI)
-npm run e2e                   # 14 browser tests (needs Edge or Chrome)
-npm run typecheck
-npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
-```
-
-### Public demo mode
-
-```bash
-npm run start:demo        # or set DEMO_MODE=1
-```
-
-- Seeds a believable shift: orders in every kitchen stage, bookings, a loyalty member with points, stock counts
-- The desk login shows one-tap **demo-barista / 2580** and **demo-manager / 1357** logins
-- Data resets every night at `DEMO_RESET_HOUR` (default 04:00, shop time)
-- The shared demo accounts can't be changed or deactivated, so one visitor can't lock out the rest
-  (visitors can still try staff management on accounts they add themselves)
+</details>
 
 ## Deploy
 
@@ -339,31 +429,6 @@ Taxes and payments, e.g. for Malaysia (see [`tenants/kopi-kita/shop.json`](tenan
 "payments": { "methods": ["cash", "card", "qr"], "qrName": "DuitNow QR" },
 "cashRounding": 5
 ```
-
-### API
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/tenants/:id` | Public business info |
-| `POST` | `/api/tenants/:id/chat` | Chat. Body `{ message, history }`; responds with an SSE stream (`sources`, `action`, `delta`, `done`) |
-| `GET` | `/api/tenants/:id/availability?date=&partySize=` | Free booking times |
-| `GET` | `/api/tenants/:id/pickup`, `.../pickup/events` | Pickup screen numbers and live updates (public) |
-| `GET` | `/api/tenants/:id/menu` | Public menu and today's pickup times |
-| `POST` | `/api/tenants/:id/orders` | Order ahead: `{ name, phone, pickupTime, items, clientRef? }`; returns a `trackingToken` |
-| `GET` | `/api/tenants/:id/orders/track?token=`, `.../track/events?token=` | The customer's order status, and live updates (SSE) |
-| `POST` | `/api/tenants/:id/loyalty` | Points balance: `{ phone }` |
-| `POST` | `/api/tenants/:id/bookings` | Book a table: `{ date, time, partySize, name, phone, notes? }` |
-| `POST` | `/api/tenants/:id/bookings/lookup`, `.../cancel` | Customer: `{ reference, phone }` |
-| `POST` | `/api/desk/login`, `/api/desk/logout` | Desk session (cookie): `{ tenantId, username, pin }` |
-| `GET`, `POST`, `PATCH` | `/api/desk/orders`, `/api/desk/orders/:id` | Till and order queue; POST takes `items[].options`, `clientRef`, optional `payment` |
-| `POST` | `/api/desk/orders/:id/pay`, `/api/desk/orders/:id/refund` | Take payment `{ method, tendered? }`; refund `{ reason }` (manager) |
-| `GET` | `/api/desk/report?date=` | End-of-day report (manager) |
-| `GET` | `/api/desk/orders/:id/receipt` | Receipt data for printing |
-| `GET`, `POST` | `/api/desk/loyalty?phone=`, `/api/desk/loyalty` | Look up or join a member; orders take `memberId` and `rewardId` |
-| `GET`, `POST`, `PATCH` | `/api/desk/staff`, `/api/desk/staff/:id` | Staff accounts (manager) |
-| `GET`, `POST`, `PATCH` | `/api/desk/bookings`, `/api/desk/bookings/:id` | Bookings by day, status changes |
-| `GET`, `POST`, `PATCH` | `/api/desk/menu`, `/api/desk/menu/:id` | Menu; PATCH `{ available }` or `{ stock }` (staff), item fields or `{ hidden }` (manager) |
-| `GET` | `/api/desk/events` | Live change events (SSE) |
 
 ## Roadmap
 
