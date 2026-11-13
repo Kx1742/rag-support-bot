@@ -3579,3 +3579,70 @@ button:disabled {
 .q-help {
   font-size: 13px;
 }
+
+/* ---------- Report: answers taught to the assistant ---------- */
+
+.answers-block {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.q-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.a-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.a-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 14px 14px 14px 18px;
+  border-radius: 18px;
+  background: var(--surface-2);
+}
+
+.a-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.a-main p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.a-main span {
+  font-size: 12.5px;
+}
+
+.answer-text {
+  min-height: 140px;
+  padding: 12px 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.answer-count {
+  margin-top: -6px;
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .q-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .q-row .btn {
+    grid-column: span 1;
+  }
+}

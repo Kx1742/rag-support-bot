@@ -245,9 +245,19 @@
           <div class="q-meter" aria-hidden="true"><i id="questions-meter"></i></div>
           <div id="questions-list"></div>
           <p class="muted q-help">
-            Add the answer to the café's documents, then tap <b>Added</b> to clear it from this list. Questions are anonymous:
-            phone numbers and emails are hidden, and everything is deleted after 90 days.
+            Tap <b>Answer it</b> to teach the assistant: it uses your answer for the next customer who asks. Questions are
+            anonymous: phone numbers and emails are hidden, and everything is deleted after 90 days.
           </p>
+        </section>
+        <section class="card-block answers-block" id="answers-block" data-perm="answers.edit" hidden>
+          <div class="questions-head">
+            <div>
+              <h2 class="section-title">Answers you've taught the assistant</h2>
+              <p class="muted" id="answers-summary"></p>
+            </div>
+            <button class="btn btn-ghost" type="button" id="answer-new">+ New answer</button>
+          </div>
+          <div id="answers-list"></div>
         </section>
       </section>
 
@@ -353,6 +363,33 @@
         <footer class="sheet-foot">
           <button class="btn btn-ghost" type="button" id="refund-cancel">Back</button>
           <button class="btn btn-danger btn-lg" type="submit" id="refund-submit">Refund &amp; cancel order</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Teach the assistant an answer -->
+    <dialog class="sheet" id="answer-dialog" aria-labelledby="answer-title">
+      <form id="answer-form" method="dialog">
+        <header class="sheet-head">
+          <h2 id="answer-title">Answer this question</h2>
+          <button class="icon-btn" type="button" id="answer-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <p class="muted" id="answer-intro">The assistant uses this answer from the next question on, in any language customers write in.</p>
+          <label class="field">Question <input class="input" id="answer-question" maxlength="200" required /></label>
+          <label class="field"
+            >Answer
+            <textarea class="input answer-text" id="answer-text" maxlength="1500" rows="5" required placeholder="Write it as you'd say it to a customer, with the details they need."></textarea>
+          </label>
+          <p class="hint answer-count" id="answer-count"></p>
+          <p class="error" id="answer-error" role="alert"></p>
+        </div>
+        <footer class="sheet-foot">
+          <button class="btn btn-danger" type="button" id="answer-delete" hidden>Delete</button>
+          <button class="btn btn-ghost" type="button" id="answer-cancel">Cancel</button>
+          <button class="btn btn-primary btn-lg" type="submit" id="answer-submit">Save answer</button>
         </footer>
       </form>
     </dialog>

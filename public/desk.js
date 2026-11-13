@@ -338,6 +338,7 @@ function scheduleRefresh(kind) {
         if (state.tab === "report") await loadReport();
       }
       if (kinds.includes("booking")) await loadBookings();
+      if (kinds.includes("answers") && state.tab === "report") await loadAnswers();
     } catch (err) {
       toast(err.message, { tone: "error" });
     }
@@ -1944,6 +1945,7 @@ async function loadReport() {
   state.report = await api(`/report?date=${state.reportDate}`);
   renderReport();
   loadQuestions().catch((err) => toast(err.message, { tone: "error" }));
+  loadAnswers().catch((err) => toast(err.message, { tone: "error" }));
 }
 
 // ---------- What customers asked that the assistant couldn't answer ----------
@@ -1972,6 +1974,9 @@ function renderQuestions(q) {
               { class: "q-row" },
               h("span", { class: "q-count", title: "Times asked" }, `${topic.count}×`),
               h("div", { class: "q-main" }, h("strong", {}, `“${topic.question}”`), h("span", { class: "muted" }, `Last asked ${timeAgo(topic.lastAsked)}`)),
+              can("answers.edit")
+                ? h("button", { type: "button", class: "btn btn-primary btn-sm", onclick: () => openAnswer({ question: topic.question, topic: topic.key }) }, "Answer it")
+                : null,
               h(
                 "button",
                 {
@@ -2006,6 +2011,107 @@ for (const b of document.querySelectorAll("#questions-range button")) {
     loadQuestions().catch((err) => toast(err.message, { tone: "error" }));
   });
 }
+
+// ---------- Answers the café teaches the assistant ----------
+
+const answerDialog = $("answer-dialog");
+let answerEditing = null; // { id?, topic? }
+
+async function loadAnswers() {
+  if (!can("answers.edit")) return;
+  const { answers } = await api("/answers");
+  $("answers-summary").textContent = answers.length
+    ? `${answers.length} answer${answers.length === 1 ? "" : "s"}. The assistant reads these like the café's own documents.`
+    : "None yet. Answer a question above, or add one here.";
+  $("answers-list").replaceChildren(
+    ...(answers.length
+      ? [
+          h(
+            "ul",
+            { class: "a-list" },
+            ...answers.map((a) =>
+              h(
+                "li",
+                { class: "a-row" },
+                h(
+                  "div",
+                  { class: "a-main" },
+                  h("strong", {}, a.question),
+                  h("p", {}, a.answer),
+                  h("span", { class: "muted" }, `${a.updatedBy ? `${a.updatedBy} · ` : ""}${timeAgo(a.updatedAt)}`),
+                ),
+                h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: () => openAnswer(a) }, "Edit"),
+              ),
+            ),
+          ),
+        ]
+      : []),
+  );
+}
+
+function openAnswer({ id, question = "", answer = "", topic } = {}) {
+  answerEditing = { id, topic };
+  $("answer-title").textContent = id ? "Edit answer" : topic ? "Answer this question" : "New answer";
+  $("answer-question").value = question;
+  $("answer-text").value = answer;
+  $("answer-error").textContent = "";
+  $("answer-delete").hidden = !id;
+  $("answer-delete").classList.remove("armed");
+  $("answer-delete").textContent = "Delete";
+  updateAnswerCount();
+  answerDialog.showModal();
+  (question ? $("answer-text") : $("answer-question")).focus();
+}
+
+function updateAnswerCount() {
+  const n = $("answer-text").value.length;
+  $("answer-count").textContent = `${n} / 1500`;
+}
+
+$("answer-text").addEventListener("input", updateAnswerCount);
+$("answer-new").addEventListener("click", () => openAnswer());
+$("answer-close").addEventListener("click", () => answerDialog.close());
+$("answer-cancel").addEventListener("click", () => answerDialog.close());
+
+$("answer-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("answer-error").textContent = "";
+  $("answer-submit").disabled = true;
+  const body = { question: $("answer-question").value, answer: $("answer-text").value, topic: answerEditing?.topic };
+  try {
+    if (answerEditing?.id) await api(`/answers/${answerEditing.id}`, { method: "PATCH", body });
+    else await api("/answers", { method: "POST", body });
+    answerDialog.close();
+    toast("Saved. The assistant will use this answer from the next question.", { tone: "success" });
+    await Promise.all([loadAnswers(), loadQuestions()]);
+  } catch (err) {
+    $("answer-error").textContent = err.message;
+  } finally {
+    $("answer-submit").disabled = false;
+  }
+});
+
+// Two taps to delete, like other destructive buttons.
+$("answer-delete").addEventListener("click", async () => {
+  const btn = $("answer-delete");
+  if (!btn.classList.contains("armed")) {
+    btn.classList.add("armed");
+    btn.textContent = "Tap again to delete";
+    setTimeout(() => {
+      btn.classList.remove("armed");
+      btn.textContent = "Delete";
+    }, 3000);
+    return;
+  }
+  try {
+    await api(`/answers/${answerEditing.id}`, { method: "DELETE" });
+    answerDialog.close();
+    toast("Answer deleted. The assistant no longer uses it.", { tone: "success" });
+    await loadAnswers();
+  } catch (err) {
+    $("answer-error").textContent = err.message;
+  }
+});
 
 /** "5 minutes ago", "yesterday", "3 days ago". */
 function timeAgo(iso) {

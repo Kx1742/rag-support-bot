@@ -8,7 +8,7 @@ import { loadIndex, saveIndex, VectorStore } from "./rag/vectorStore.ts";
 import { createBookingTools, soldOutNotices } from "./shop/chatTools.ts";
 import type { Shop } from "./shop/shop.ts";
 import { indexPath, loadTenant } from "./tenant.ts";
-import type { ChatProvider, EmbeddingProvider } from "./types.ts";
+import type { ChatProvider, EmbeddingProvider, SourceDocument } from "./types.ts";
 
 /** Loads .env from the project root if it exists (Node's built-in loader). */
 export function loadEnv(): void {
@@ -48,17 +48,17 @@ export function createProviders(env: NodeJS.ProcessEnv = process.env): Providers
 /** Embeds a tenant's docs and saves the index. Skips work if nothing changed. */
 export async function ingestTenant(
   tenantId: string,
-  opts: { force?: boolean; embedder?: EmbeddingProvider } = {},
+  opts: { force?: boolean; embedder?: EmbeddingProvider; extraDocs?: SourceDocument[] } = {},
 ) {
   const embedder = opts.embedder ?? createProviders().embedder;
-  const { docs } = await loadTenant(tenantId);
+  const docs = [...(await loadTenant(tenantId)).docs, ...(opts.extraDocs ?? [])];
   const path = indexPath(tenantId);
   const existing = await loadIndex(path);
 
   if (!opts.force && isIndexFresh(existing, docs, embedder)) {
     return { index: existing!, path, skipped: true };
   }
-  const index = await buildIndex(tenantId, docs, embedder);
+  const index = await buildIndex(tenantId, docs, embedder, opts.force ? null : existing);
   await saveIndex(path, index);
   return { index, path, skipped: false };
 }
@@ -69,7 +69,9 @@ export async function ingestTenant(
  */
 export async function createAssistant(tenantId: string, providers = createProviders(), shop: Shop | null = null): Promise<Assistant> {
   const { config } = await loadTenant(tenantId);
-  const { index } = await ingestTenant(tenantId, { embedder: providers.embedder });
+  // Answers added on the staff desk are one more document.
+  const teamAnswers = shop?.answers.asDocument();
+  const { index } = await ingestTenant(tenantId, { embedder: providers.embedder, extraDocs: teamAnswers ? [teamAnswers] : [] });
   const minScore = process.env.RAG_MIN_SCORE ? Number(process.env.RAG_MIN_SCORE) : providers.defaultMinScore;
 
   return new Assistant({

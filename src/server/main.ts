@@ -30,10 +30,15 @@ function shopTenants(): string[] {
   return [defaultTenant, ...ids.filter((id) => id !== defaultTenant).sort()].filter((id) => ids.includes(id));
 }
 
-/** Caches one promise per tenant; a failed load is forgotten so the next request retries. */
+/**
+ * Caches one promise per tenant; a failed load is forgotten so the next request retries.
+ * refresh() builds a new value in the background and swaps it in once ready, so requests
+ * keep using the current one meanwhile.
+ */
 function cached<T>(load: (tenantId: string) => Promise<T>) {
   const cache = new Map<string, Promise<T>>();
-  return (tenantId: string): Promise<T> => {
+  const versions = new Map<string, number>();
+  const get = (tenantId: string): Promise<T> => {
     let pending = cache.get(tenantId);
     if (!pending) {
       pending = load(tenantId);
@@ -42,12 +47,26 @@ function cached<T>(load: (tenantId: string) => Promise<T>) {
     }
     return pending;
   };
+  get.refresh = (tenantId: string) => {
+    if (!cache.has(tenantId)) return; // not loaded yet: the first request loads the latest
+    const version = (versions.get(tenantId) ?? 0) + 1;
+    versions.set(tenantId, version);
+    load(tenantId).then(
+      (value) => versions.get(tenantId) === version && cache.set(tenantId, Promise.resolve(value)),
+      (err) => console.error(`Could not reload ${tenantId}:`, err),
+    );
+  };
+  return get;
 }
 
 const openShops = new Set<Shop>();
 const loadShop = cached(async (tenantId) => {
   const shop = await openShop(tenantId);
-  if (shop) openShops.add(shop);
+  if (shop) {
+    openShops.add(shop);
+    // Answers added on the desk: rebuild this café's assistant so the chat uses them right away.
+    shop.events.on("change", (change: { kind: string }) => change.kind === "answers" && loadAssistant.refresh(tenantId));
+  }
   return shop;
 });
 const getShop = async (tenantId: string): Promise<Shop | null> => (tenantExists(tenantId) ? loadShop(tenantId) : null);

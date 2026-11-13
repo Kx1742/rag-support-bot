@@ -117,6 +117,9 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
   for the last 7/30/90 days and the missing topics ranked by how often they're asked (different wordings
   are grouped), so the owner knows exactly what to add to their documents; "Added" clears a topic.
   Anonymous: phone numbers and emails are masked before saving, and questions are deleted after 90 days
+- **Teach the assistant from the desk** (managers): "Answer it" on a reported question, type the answer,
+  save, and the very next customer gets it, cited like any other source, in any language. Answers can be
+  added, edited and deleted under "Answers you've taught the assistant"; no files, no redeploy
 
 **Engineering**
 - Zero runtime dependencies: Node's built-in `node:http`, `node:sqlite` and `fetch`
@@ -127,14 +130,14 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
-- 171 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 178 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
 - **Answer-quality tests** (`npm run eval`, also in CI): each café has a set of real questions in
   `tenants/<id>/eval.json` with the document that should answer them, a phrase the answer must contain,
   and questions the assistant must *not* pretend to answer. The script reports the score, how often the
   right document came first and in the top 3, and fails below the café's minimum. It already caught a
   bug: offline search didn't match "dog" to "Dogs" (short plurals weren't stemmed). `--live` runs it
   against the real AI
-- 13 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, a Malaysian dine-in order with SST paid by DuitNow QR, the unanswered-questions report, switching language, phone layout); they run on every push, with failure screenshots saved
+- 14 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, a Malaysian dine-in order with SST paid by DuitNow QR, the unanswered-questions report, answering a question on the desk and the chat using it at once, switching language, phone layout); they run on every push, with failure screenshots saved
 
 ## How it works
 
@@ -229,6 +232,8 @@ them. Unexpected errors are not.
 | `VACUUM INTO` for backups | A consistent snapshot while the app keeps running, with no extra tools. |
 | Money formatted in the shop's locale, not the browser's | A US café shows "$4.75" on every till, not "US$4.75" on a till set to another region. |
 | "Unanswered" = nothing relevant found, or the answer hands over the café's contact details | The prompt tells the AI to give the contact details when the documents don't have the answer, so this catches polite "I'm not sure" replies without a second AI call. |
+| Desk answers live in the shop database and become one extra document for the assistant | They survive redeploys (on Render the code folder is rebuilt, the data disk isn't), get cited like any source, and the prompt-injection rules for documents apply to them too. |
+| Re-indexing reuses embeddings for unchanged text, and the new assistant is swapped in once ready | Adding one answer embeds one chunk, not the whole café (cheap with a paid embeddings API), and chats keep working during the rebuild. |
 | Chat questions stored masked, unlinked to anyone, deleted after 90 days | Owners get the insight; customers' phone numbers and emails never land in the database. |
 | Request logs keep the path only | Query strings can contain phone numbers; logs shouldn't. |
 | One receipt builder on the server for the till and the customer | Printed and digital receipts can't disagree. |
@@ -262,9 +267,9 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 171 unit and API tests
+npm test                      # 178 unit and API tests
 npm run eval                  # answer-quality score per café (add -- --live to use the AI)
-npm run e2e                   # 13 browser tests (needs Edge or Chrome)
+npm run e2e                   # 14 browser tests (needs Edge or Chrome)
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
@@ -378,6 +383,7 @@ Taxes and payments, e.g. for Malaysia (see [`tenants/kopi-kita/shop.json`](tenan
 - [x] Second demo café in Malaysia: RM, SST, service charge, 5-sen rounding, DuitNow QR
 - [ ] Put the live demo URL in this README
 - [x] Report of questions the assistant couldn't answer; answer-quality tests in CI
+- [x] Teach the assistant new answers from the desk
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 
 ## Privacy note

@@ -205,6 +205,29 @@ try {
     assert(/\d+% of \d+ questions answered/.test(rate), `answer rate should show: ${rate}`);
   });
 
+  await test("manager answers it on the desk, and the chat uses that answer right away", async () => {
+    await desk.run(`
+      [...document.querySelector("#questions-list .q-row").querySelectorAll("button")].find((b) => b.textContent === "Answer it").click();
+      await new Promise((r) => setTimeout(r, 200));
+      document.getElementById("answer-text").value = "Yes, there's a baby changing table in the accessible restroom at the back.";
+      document.getElementById("answer-submit").click();
+    `);
+    await desk.waitFor(`document.getElementById("answers-list").innerText.includes("accessible restroom")`, { what: "saved answer" });
+    const left = await desk.run<string>(`return document.getElementById("questions-list").innerText;`);
+    assert(!/baby changing/i.test(left), `the answered question should leave the list: ${left}`);
+
+    // The assistant is rebuilt in the background; ask until it uses the new answer (a second or two).
+    let reply = "";
+    for (let i = 0; i < 20 && !/accessible restroom/.test(reply); i++) {
+      reply = await chat.run<string>(`
+        const res = await fetch("/api/tenants/${TENANT}/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Is there a baby changing table?" }) });
+        return (await res.text()).split("\\n").filter((l) => l.startsWith("data:")).map((l) => JSON.parse(l.slice(5))).filter((d) => d.type === "delta").map((d) => d.text).join("");
+      `);
+      if (!/accessible restroom/.test(reply)) await sleep(250);
+    }
+    assert(/accessible restroom/.test(reply), `chat should answer with the desk's answer, got: ${reply}`);
+  });
+
   await test("customer books a table and staff see it on the desk", async () => {
     await chat.run(`document.getElementById("book-btn").click();`);
     await chat.waitFor(`[...document.querySelectorAll(".booking-card .times button")].length > 0`, { what: "booking times" });

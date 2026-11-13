@@ -10,9 +10,10 @@ import { LoyaltyService } from "./loyalty.ts";
 import { MenuService } from "./menu.ts";
 import { OrderService } from "./orders.ts";
 import { QuestionLog } from "./questions.ts";
+import { AnswerBook } from "./answers.ts";
 import { StaffService } from "./staff.ts";
 
-export type ShopChange = { kind: "booking" | "order" | "menu"; id: string | number; action: "created" | "updated" };
+export type ShopChange = { kind: "booking" | "order" | "menu" | "answers"; id: string | number; action: "created" | "updated" };
 
 /**
  * Everything one business needs for bookings and the till, backed by its own
@@ -28,6 +29,8 @@ export class Shop {
   readonly loyalty: LoyaltyService;
   /** What customers ask the chat assistant, and whether it could answer. */
   readonly questions: QuestionLog;
+  /** Answers added on the desk; the assistant reads them as an extra document. */
+  readonly answers: AnswerBook;
   readonly events = new EventEmitter();
   private readonly db: DatabaseSync;
   private readonly clock?: () => Date;
@@ -57,6 +60,7 @@ export class Shop {
     });
     this.staff = new StaffService({ db: this.db, now });
     this.questions = new QuestionLog({ db: this.db, now });
+    this.answers = new AnswerBook({ db: this.db, now, onChange: () => emit("answers")(0) });
     this.menu.sync(this.config.menu);
   }
 
@@ -74,6 +78,7 @@ export class Shop {
         DELETE FROM bookings;
         DELETE FROM staff;
         DELETE FROM chat_questions;
+        DELETE FROM team_answers;
         DELETE FROM menu_items WHERE origin = 'desk';
         UPDATE menu_items SET edited = 0, stock = NULL, available = 1;
       `);

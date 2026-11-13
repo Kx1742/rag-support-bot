@@ -160,6 +160,25 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
       return ok(res, { handled: shop.questions.markHandled(String(b.key ?? "")) });
     }
 
+    // ----- answers the assistant learns from the desk -----
+    case "GET /answers":
+      need("answers.edit");
+      return ok(res, { answers: shop.answers.list() });
+    case "POST /answers": {
+      need("answers.edit");
+      const b = await readObject(req);
+      const answer = shop.answers.create({ question: String(b.question ?? ""), answer: String(b.answer ?? "") }, actor.name);
+      // Answering a question from the report also clears it from the "couldn't answer" list.
+      if (b.topic) {
+        try {
+          shop.questions.markHandled(String(b.topic));
+        } catch {
+          /* already cleared */
+        }
+      }
+      return ok(res, { answer }, 201);
+    }
+
     // ----- staff accounts -----
     case "GET /staff":
       need("staff.manage");
@@ -228,6 +247,16 @@ export async function handleDesk(req: IncomingMessage, res: ServerResponse, url:
     }
     need("menu.edit");
     return ok(res, { item: shop.menu.update(id, parseMenuItem(body)) });
+  }
+  if (req.method === "PATCH" && (match = /^\/answers\/(\d+)$/.exec(rest))) {
+    need("answers.edit");
+    const b = await readObject(req);
+    return ok(res, { answer: shop.answers.update(idParam(match[1]), { question: String(b.question ?? ""), answer: String(b.answer ?? "") }, actor.name) });
+  }
+  if (req.method === "DELETE" && (match = /^\/answers\/(\d+)$/.exec(rest))) {
+    need("answers.edit");
+    shop.answers.remove(idParam(match[1]));
+    return ok(res, { ok: true });
   }
   if (req.method === "PATCH" && (match = /^\/staff\/(\d+)$/.exec(rest))) {
     need("staff.manage");

@@ -18,6 +18,7 @@ export const PERMISSIONS = {
   "menu.edit": "Add menu items, change prices and options, hide items",
   "sales.view": "See sales totals",
   "reports.view": "See the end-of-day report",
+  "answers.edit": "Teach the chat assistant new answers",
   "staff.manage": "Add staff, change roles and reset PINs",
 } as const;
 

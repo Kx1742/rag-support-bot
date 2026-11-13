@@ -155,6 +155,17 @@ const MIGRATIONS = [
   CREATE INDEX chat_questions_by_time ON chat_questions (asked_at);
   CREATE INDEX chat_questions_by_topic ON chat_questions (topic, answered, handled);
   `,
+  // 8: answers the café adds from the desk; the assistant reads them as one more document
+  `
+  CREATE TABLE team_answers (
+    id         INTEGER PRIMARY KEY,
+    question   TEXT NOT NULL,
+    answer     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT ''
+  );
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */
