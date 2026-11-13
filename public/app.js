@@ -16,6 +16,13 @@ let tenantId = "";
 let tenantInfo = null;
 let history = [];
 let busy = false;
+/** Formats cents in the café's currency (replaced once the café's settings load). */
+let money = moneyFormatter({ currency: "USD", locale: "en-US" });
+
+function moneyFormatter({ currency, locale }) {
+  const fmt = new Intl.NumberFormat(locale, { style: "currency", currency });
+  return (cents) => fmt.format(cents / 100);
+}
 
 // Language switcher (translations live in i18n.js).
 const langSelect = $("lang-select");
@@ -37,6 +44,9 @@ async function init() {
       t("demoLogins"),
       el("a", { href: `/display?tenant=${encodeURIComponent(tenantId)}`, target: "_blank", rel: "noopener" }, t("pickupScreen")),
     );
+    for (const cafe of (config.demo.cafes ?? []).filter((c) => c.id !== tenantId)) {
+      strip.append(" · ", el("a", { href: `/?tenant=${encodeURIComponent(cafe.id)}` }, t("tryCafe", { name: cafe.name })));
+    }
   }
   const tenant = await getJson(`/api/tenants/${encodeURIComponent(tenantId)}`);
 
@@ -49,6 +59,7 @@ async function init() {
   $("mode-badge").hidden = config.mode !== "offline";
   if (tenant.brandColor) document.documentElement.style.setProperty("--brand", tenant.brandColor);
   tenantInfo = tenant;
+  if (tenant.money) money = moneyFormatter(tenant.money);
   // Quick actions: only the ones this business offers.
   const actions = [
     ["order-btn", tenant.orderAhead, openOrderCard],
@@ -546,7 +557,6 @@ async function openOrderCard() {
     return;
   }
 
-  const money = (cents) => `$${(cents / 100).toFixed(2)}`;
   const groups = new Map(data.optionGroups.map((g) => [g.id, g]));
   const categories = [...new Set(data.menu.map((m) => m.category))];
   const cart = []; // { key, item, options, qty, label, unit }
@@ -590,7 +600,7 @@ async function openOrderCard() {
     "form",
     { class: "booking-card form order-card" },
     el("strong", {}, t("orderAhead")),
-    el("div", { class: "hint" }, t("orderAheadHint")),
+    el("div", { class: "hint" }, payHint()),
     tabs,
     list,
     cartBox,
@@ -700,7 +710,14 @@ async function openOrderCard() {
   }
 
   function renderCart() {
-    const total = cart.reduce((n, l) => n + l.unit * l.qty, 0);
+    const subtotal = cart.reduce((n, l) => n + l.unit * l.qty, 0);
+    // Same rule as the server: each charge is a percentage of the amount so far.
+    let total = subtotal;
+    const charges = (data.charges ?? []).map((c) => {
+      const amount = Math.round((total * c.percent) / 100);
+      total += amount;
+      return { name: c.name, amount };
+    });
     cartBox.replaceChildren(
       ...(cart.length
         ? cart.map((l) =>
@@ -726,6 +743,7 @@ async function openOrderCard() {
             ),
           )
         : [el("div", { class: "hint" }, t("cartEmpty"))]),
+      ...(cart.length ? charges.map((c) => el("div", { class: "cart-line cart-charge" }, el("div", { class: "hint" }, c.name), el("span", { class: "hint" }, money(c.amount)))) : []),
     );
     submit.disabled = cart.length === 0;
     submit.textContent = cart.length ? t("placeOrderTotal", { total: money(total) }) : t("placeOrder");
@@ -833,7 +851,6 @@ const ORDER_STEPS = [
  */
 function trackOrder(order) {
   const number = `#${String(order.number).padStart(3, "0")}`;
-  const money = (cents) => `$${(cents / 100).toFixed(2)}`;
   const steps = el("ol", { class: "order-steps" });
   const headline = el("strong", {}, t("orderPlaced"));
   const status = el("div", { class: "order-status-text" });
@@ -934,12 +951,32 @@ function receiptNodes(r) {
     ),
     row(t("subtotal"), m(r.subtotal)),
     r.discount ? row(r.reward ?? t("reward"), `−${m(r.discount)}`) : null,
+    ...(r.charges ?? []).map((c) => row(c.name, m(c.amount))),
     row(t("total"), m(r.total), "r-total"),
-    p.status === "paid" ? row(t("paidBy", { method: t(`method_${p.method}`) }), m(p.tendered ?? r.total)) : row(p.status === "refunded" ? t("refunded") : t("notPaid"), ""),
+    p.status === "paid" && p.rounding ? row(t("rounding"), `${p.rounding > 0 ? "+" : "−"}${m(Math.abs(p.rounding))}`) : null,
+    p.status === "paid" && p.rounding ? row(t("amountPaid"), m(p.amount), "r-total") : null,
+    p.status === "paid" ? row(t("paidBy", { method: methodName(p.method, p.methodName) }), m(p.tendered ?? r.total)) : row(p.status === "refunded" ? t("refunded") : t("notPaid"), ""),
     p.status === "paid" && p.method === "cash" && p.change ? row(t("change"), m(p.change)) : null,
     r.pointsEarned ? el("div", { class: "r-note" }, t("loyaltyPoints", { n: r.pointsEarned })) : null,
     r.business.footer ? el("div", { class: "r-foot" }, r.business.footer) : null,
   ].filter(Boolean);
+}
+
+/** "cash" -> "tunai" etc.; a QR method keeps the café's own name, e.g. "DuitNow QR". */
+function methodName(method, fallback) {
+  return method === "cash" || method === "card" ? t(`method_${method}`) : (fallback ?? method);
+}
+
+/** "Pick up at the counter and pay there by cash, card or DuitNow QR." in the visitor's language. */
+function payHint() {
+  const names = (tenantInfo.payments ?? ["cash", "card"]).map((m) => methodName(m, m));
+  let list = names.join(", ");
+  try {
+    list = new Intl.ListFormat(document.documentElement.lang, { type: "disjunction" }).format(names);
+  } catch {
+    /* older browsers: plain commas */
+  }
+  return t("orderAheadPay", { methods: list });
 }
 
 /** Remembers tracked orders in this browser so a reload doesn't lose them. */

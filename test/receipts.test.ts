@@ -45,7 +45,8 @@ describe("receipts", () => {
     );
     assert.deepEqual([r.subtotal, r.discount, r.total], [1560, 605, 955]);
     assert.equal(r.reward, "Free drink (any size)");
-    assert.deepEqual(r.payment, { status: "paid", method: "cash", tendered: 1000, change: 45 });
+    assert.deepEqual(r.payment, { status: "paid", method: "cash", methodName: "Cash", tendered: 1000, change: 45, rounding: 0, amount: 955 });
+    assert.deepEqual(r.charges, []);
     assert.equal(r.pointsEarned, 9);
     assert.equal(r.servedBy, "Sam");
   });

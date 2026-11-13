@@ -89,6 +89,13 @@ start();
 async function start() {
   try {
     state.info = await api("/me");
+    // Opened for a different business than the one logged in (e.g. switching demo cafés):
+    // log out so nobody ends up working on the wrong café's till.
+    const wanted = new URLSearchParams(location.search).get("tenant");
+    if (wanted && wanted !== state.info.tenantId) {
+      await fetch("/api/desk/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
+      throw new Error("different business");
+    }
     await enterDesk();
   } catch {
     showLogin();
@@ -554,9 +561,12 @@ function renderTicket(flashKey) {
   const count = lines.reduce((n, l) => n + l.line.qty, 0);
   const total = ticketTotal();
   const reward = rewardPreview();
-  $("ticket-count").textContent = reward.discount
-    ? `${count} item${count === 1 ? "" : "s"} · ${money(reward.discount)} off`
-    : `${count} item${count === 1 ? "" : "s"}`;
+  const charges = ticketCharges();
+  $("ticket-count").textContent =
+    `${count} item${count === 1 ? "" : "s"}` +
+    (reward.discount ? ` · ${money(reward.discount)} off` : "") +
+    (charges.length && lines.length ? ` · incl. ${charges.map((c) => c.name).join(" + ")}` : "");
+  $("ticket-count").title = charges.map((c) => `${c.name}: ${money(c.amount)}`).join("\n");
   $("ticket-total").textContent = money(total);
   renderMemberSlot(reward);
   $("empty-ticket").hidden = lines.length > 0;
@@ -578,9 +588,28 @@ function ticketSubtotal() {
   }, 0);
 }
 
-/** What the customer pays after a reward. The server re-checks this. */
+/** What the customer pays after a reward, plus taxes/service charge. The server re-checks this. */
 function ticketTotal() {
-  return ticketSubtotal() - rewardPreview().discount;
+  return ticketSubtotal() - rewardPreview().discount + ticketCharges().reduce((n, c) => n + c.amount, 0);
+}
+
+/** Same rule as the server: each charge is a percentage of the amount so far; some are dine-in only. */
+function ticketCharges() {
+  let running = ticketSubtotal() - rewardPreview().discount;
+  const out = [];
+  for (const c of state.info?.charges ?? []) {
+    if (c.dineInOnly && state.orderType !== "dine_in") continue;
+    const amount = Math.round((running * c.percent) / 100);
+    out.push({ name: c.name, amount });
+    running += amount;
+  }
+  return out;
+}
+
+/** Cash totals round to the shop's smallest coin (e.g. 5 sen in Malaysia). */
+function cashDue(total) {
+  const step = state.info?.cashRounding ?? 1;
+  return Math.round(total / step) * step;
 }
 
 /** Same rule as the server: each reward part makes the most expensive matching unit free. */
@@ -805,12 +834,16 @@ const payDialog = $("pay-dialog");
 let payState = null;
 
 function openPayment({ title, total, pay }) {
-  payState = { total, pay, method: "cash", tendered: null };
+  const methods = state.info?.payments?.methods ?? ["cash", "card"];
+  payState = { total, cashTotal: cashDue(total), pay, method: methods[0], tendered: null };
   $("pay-title").textContent = title;
-  $("pay-total").textContent = money(total);
+  for (const b of document.querySelectorAll("#pay-method button")) {
+    b.hidden = !methods.includes(b.dataset.method);
+    if (b.dataset.method === "qr") b.textContent = state.info?.payments?.qrName ?? "QR payment";
+  }
   $("pay-tendered").value = "";
   $("pay-error").textContent = "";
-  setPayMethod("cash");
+  setPayMethod(payState.method);
   renderQuickCash();
   renderChange();
   payDialog.showModal();
@@ -821,6 +854,12 @@ function setPayMethod(method) {
   for (const b of document.querySelectorAll("#pay-method button")) b.setAttribute("aria-checked", String(b.dataset.method === method));
   $("pay-cash").hidden = method !== "cash";
   $("pay-card").hidden = method !== "card";
+  $("pay-qr").hidden = method !== "qr";
+  // Cash may round (e.g. to 5 sen); card and QR pay the exact total.
+  const rounded = method === "cash" && payState.cashTotal !== payState.total;
+  $("pay-total").textContent = money(method === "cash" ? payState.cashTotal : payState.total);
+  $("pay-rounding").hidden = !rounded;
+  $("pay-rounding").textContent = rounded ? `Rounded from ${money(payState.total)} (cash rounding)` : "";
   renderChange();
 }
 
@@ -828,7 +867,7 @@ for (const b of document.querySelectorAll("#pay-method button")) b.addEventListe
 
 /** Exact amount plus the next round notes customers usually hand over. */
 function renderQuickCash() {
-  const total = payState.total;
+  const total = payState.cashTotal;
   const amounts = new Set([total]);
   for (const step of [500, 1000, 2000, 5000, 10000]) amounts.add(Math.ceil(total / step) * step);
   const sorted = [...amounts].filter((a) => a >= total).sort((a, b) => a - b).slice(0, 5);
@@ -863,9 +902,9 @@ $("pay-tendered").addEventListener("input", (e) => {
 function renderChange() {
   if (!payState) return;
   const box = $("pay-change");
-  if (payState.method === "card") {
+  if (payState.method === "card" || payState.method === "qr") {
     $("pay-submit").disabled = false;
-    $("pay-submit").textContent = `Card approved · ${money(payState.total)}`;
+    $("pay-submit").textContent = `${payState.method === "card" ? "Card approved" : "Payment received"} · ${money(payState.total)}`;
     return;
   }
   const t = payState.tendered;
@@ -874,13 +913,13 @@ function renderChange() {
     box.className = "change-due";
     box.replaceChildren("Choose the cash given");
     $("pay-submit").disabled = true;
-  } else if (t < payState.total) {
+  } else if (t < payState.cashTotal) {
     box.className = "change-due short";
-    box.replaceChildren("Short by", h("strong", {}, money(payState.total - t)));
+    box.replaceChildren("Short by", h("strong", {}, money(payState.cashTotal - t)));
     $("pay-submit").disabled = true;
   } else {
     box.className = "change-due ok";
-    box.replaceChildren("Change due", h("strong", {}, money(t - payState.total)));
+    box.replaceChildren("Change due", h("strong", {}, money(t - payState.cashTotal)));
     $("pay-submit").disabled = false;
   }
 }
@@ -892,7 +931,7 @@ $("pay-form").addEventListener("submit", async (e) => {
   $("pay-error").textContent = "";
   $("pay-submit").disabled = true;
   try {
-    const payment = payState.method === "cash" ? { method: "cash", tendered: payState.tendered } : { method: "card" };
+    const payment = payState.method === "cash" ? { method: "cash", tendered: payState.tendered } : { method: payState.method };
     await payState.pay(payment);
     payDialog.close();
   } catch (err) {
@@ -952,15 +991,18 @@ function receiptNodes(r) {
     ),
     row("Subtotal", m(r.subtotal)),
     r.discount ? row(r.reward ?? "Reward", `−${m(r.discount)}`) : null,
+    ...(r.charges ?? []).map((c) => row(c.name, m(c.amount))),
     row("Total", m(r.total), "r-total"),
     p.status === "paid"
       ? h(
           "div",
           { class: "r-pay" },
-          row(`Paid by ${p.method}`, m(p.tendered ?? r.total)),
+          p.rounding ? row("Rounding", `${p.rounding > 0 ? "+" : "−"}${m(Math.abs(p.rounding))}`) : null,
+          p.rounding ? row("Amount paid", m(p.amount), "r-total") : null,
+          row(`Paid by ${p.methodName ?? p.method}`, m(p.tendered ?? r.total)),
           p.method === "cash" && p.change ? row("Change", m(p.change)) : null,
         )
-      : h("div", { class: "r-pay" }, row(p.status === "refunded" ? "Refunded" : "Not paid yet", p.status === "refunded" ? m(r.total) : "")),
+      : h("div", { class: "r-pay" }, row(p.status === "refunded" ? "Refunded" : "Not paid yet", p.status === "refunded" ? m(p.amount ?? r.total) : "")),
     r.pointsEarned ? h("div", { class: "r-note" }, `+${r.pointsEarned} loyalty points`) : null,
     r.servedBy ? h("div", { class: "r-note" }, `Served by ${r.servedBy}`) : null,
     r.business.footer ? h("div", { class: "r-foot" }, r.business.footer) : null,
@@ -1346,7 +1388,7 @@ $("refund-form").addEventListener("submit", async (e) => {
   try {
     await api(`/orders/${refundOrder.id}/refund`, { method: "POST", body: { reason: $("refund-reason").value } });
     refundDialog.close();
-    toast(`#${pad(refundOrder.number)} refunded · ${money(refundOrder.total)}${refundOrder.payment.method === "cash" ? " cash back" : " to card"}`, {
+    toast(`#${pad(refundOrder.number)} refunded · ${money(refundOrder.payment.amount ?? refundOrder.total)}${{ cash: " cash back", card: " to card", qr: ` back by ${state.info.payments?.qrName ?? "QR"}` }[refundOrder.payment.method] ?? ""}`, {
       tone: "success",
     });
     await loadOrders();
@@ -1917,6 +1959,8 @@ function renderReport() {
     stat(String(s.items), "items sold"),
     stat(money(s.cash), "cash (expected in drawer)"),
     stat(money(s.card), "card"),
+    ...(state.info.payments?.methods.includes("qr") ? [stat(money(s.qr ?? 0), state.info.payments.qrName)] : []),
+    ...(s.charges ?? []).map((c) => stat(money(c.amount), `${c.name} collected`)),
     stat(money(s.unpaidTotal), `unpaid (${s.unpaid})`, s.unpaid ? "warn" : ""),
     stat(money(s.refunds), "refunded", s.refunds ? "late" : ""),
     stat(money(s.rewards ?? 0), "loyalty rewards given"),
@@ -1977,6 +2021,9 @@ $("report-csv").addEventListener("click", () => {
     ["Paid sales", cents(r.summary.sales)],
     ["Cash", cents(r.summary.cash)],
     ["Card", cents(r.summary.card)],
+    ...(state.info.payments?.methods.includes("qr") ? [[state.info.payments.qrName, cents(r.summary.qr ?? 0)]] : []),
+    ...(r.summary.charges ?? []).map((c) => [`${c.name} collected`, cents(c.amount)]),
+    ...(r.summary.rounding ? [["Cash rounding", cents(r.summary.rounding)]] : []),
     ["Unpaid", cents(r.summary.unpaidTotal)],
     ["Refunded", cents(r.summary.refunds)],
     [],

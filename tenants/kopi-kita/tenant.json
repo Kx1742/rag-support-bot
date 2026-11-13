@@ -1,0 +1,17 @@
+{
+  "id": "kopi-kita",
+  "name": "Kopi Kita",
+  "fictional": true,
+  "assistantName": "Kiki",
+  "tone": "friendly, warm and concise, like a helpful kopitiam auntie; happy to use a little Manglish",
+  "fallbackContact": "WhatsApp 012-000 4567 or hello@kopikita.example",
+  "language": "auto",
+  "brandColor": "#1f6f5c",
+  "suggestedQuestions": [
+    "Is your food halal?",
+    "Boleh bayar guna DuitNow?",
+    "你们几点开门？",
+    "Do you charge SST and service charge?",
+    "How do Kopi Points work?"
+  ]
+}

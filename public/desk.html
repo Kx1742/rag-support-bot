@@ -290,9 +290,11 @@
         </header>
         <div class="sheet-body">
           <div class="pay-total"><span>Total</span><strong id="pay-total">$0.00</strong></div>
+          <p class="muted pay-rounding" id="pay-rounding" hidden></p>
           <div class="segmented" id="pay-method" role="radiogroup" aria-label="Payment method">
             <button type="button" role="radio" data-method="cash" aria-checked="true">Cash</button>
             <button type="button" role="radio" data-method="card" aria-checked="false">Card</button>
+            <button type="button" role="radio" data-method="qr" aria-checked="false" hidden>QR payment</button>
           </div>
           <div id="pay-cash">
             <div class="field">Cash given</div>
@@ -301,6 +303,7 @@
             <div class="change-due" id="pay-change"></div>
           </div>
           <p class="muted" id="pay-card" hidden>Take the card payment on your card machine, then confirm here once it's approved.</p>
+          <p class="muted" id="pay-qr" hidden>Ask the customer to scan the QR code at the counter. Check the payment notification for the exact amount, then confirm here.</p>
           <p class="error" id="pay-error" role="alert"></p>
         </div>
         <footer class="sheet-foot">

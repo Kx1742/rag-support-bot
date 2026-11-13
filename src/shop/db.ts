@@ -137,6 +137,11 @@ const MIGRATIONS = [
   CREATE UNIQUE INDEX orders_by_tracking_token ON orders (tracking_token) WHERE tracking_token IS NOT NULL;
   ALTER TABLE order_items ADD COLUMN category TEXT;     -- menu category at order time (for bar/kitchen screens)
   `,
+  // 6: taxes/service charges and cash rounding
+  `
+  ALTER TABLE orders ADD COLUMN charges TEXT NOT NULL DEFAULT '[]';   -- [{id, name, percent, amount}], frozen at order time
+  ALTER TABLE orders ADD COLUMN rounding INTEGER NOT NULL DEFAULT 0;  -- cash rounding adjustment in cents (e.g. -2)
+  `,
 ];
 
 /** Opens (or creates) a SQLite database and brings its schema up to date. */

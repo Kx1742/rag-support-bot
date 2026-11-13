@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { normalizePhone } from "./bookings.ts";
-import type { ShopConfig } from "./config.ts";
+import { cashDue, chargesFor, PAYMENT_METHOD_IDS, type PaymentMethodId, paymentMethods, type ShopConfig } from "./config.ts";
 import { transaction } from "./db.ts";
 import { ShopError } from "./errors.ts";
 import { type LoyaltyService, rewardDiscount } from "./loyalty.ts";
@@ -12,8 +12,8 @@ import { fromMinutes, isTime, toMinutes, weekdayOf, zonedNow } from "./time.ts";
 export const ORDER_STATUSES = ["new", "preparing", "ready", "completed", "cancelled"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export type OrderType = "takeaway" | "dine_in";
-export const PAYMENT_METHODS = ["cash", "card"] as const;
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const PAYMENT_METHODS = PAYMENT_METHOD_IDS;
+export type PaymentMethod = PaymentMethodId;
 export type PaymentStatus = "unpaid" | "paid" | "refunded";
 
 const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -54,6 +54,10 @@ export interface Payment {
   method: PaymentMethod | null;
   tendered: number | null;
   change: number | null;
+  /** Cash rounding adjustment in cents (e.g. -2 when RM10.02 is paid as RM10.00). */
+  rounding: number;
+  /** What was actually paid: total + rounding (null while unpaid). */
+  amount: number | null;
   paidAt: string | null;
   paidBy: string | null;
   refundedAt: string | null;
@@ -75,7 +79,9 @@ export interface Order {
   subtotal: number;
   /** Taken off by a loyalty reward. */
   discount: number;
-  /** What the customer pays: subtotal - discount. */
+  /** Taxes and service charges, frozen at order time. */
+  charges: OrderCharge[];
+  /** What the customer pays: subtotal - discount + charges (cash may round this; see payment.rounding). */
   total: number;
   items: OrderLine[];
   payment: Payment;
@@ -95,6 +101,13 @@ export interface Order {
 }
 
 export type OrderSource = "till" | "online";
+
+export interface OrderCharge {
+  id: string;
+  name: string;
+  percent: number;
+  amount: number;
+}
 
 /** What the customer sees about their online order. */
 export interface PublicOrder {
@@ -123,8 +136,18 @@ export interface Receipt {
   subtotal: number;
   discount: number;
   reward: string | null;
+  charges: { name: string; amount: number }[];
   total: number;
-  payment: { status: PaymentStatus; method: PaymentMethod | null; tendered: number | null; change: number | null };
+  payment: {
+    status: PaymentStatus;
+    method: PaymentMethod | null;
+    /** e.g. "DuitNow QR" for "qr". */
+    methodName: string | null;
+    tendered: number | null;
+    change: number | null;
+    rounding: number;
+    amount: number | null;
+  };
   pointsEarned: number;
   servedBy: string;
 }
@@ -265,8 +288,17 @@ export class OrderService {
       subtotal: order.subtotal,
       discount: order.discount,
       reward: order.reward?.name ?? null,
+      charges: order.charges.map((c) => ({ name: c.name, amount: c.amount })),
       total: order.total,
-      payment: { status: order.payment.status, method: order.payment.method, tendered: order.payment.tendered, change: order.payment.change },
+      payment: {
+        status: order.payment.status,
+        method: order.payment.method,
+        methodName: order.payment.method ? this.methodName(order.payment.method) : null,
+        tendered: order.payment.tendered,
+        change: order.payment.change,
+        rounding: order.payment.rounding,
+        amount: order.payment.amount,
+      },
       pointsEarned: order.pointsEarned,
       servedBy: order.payment.paidBy || order.createdBy,
     };
@@ -329,7 +361,8 @@ export class OrderService {
     if (input.rewardId && memberId === null) throw new ShopError("invalid_reward", "Add a loyalty member to use a reward.");
     const reward = input.rewardId ? this.loyalty!.reward(input.rewardId) : null;
     const discount = reward ? rewardDiscount(reward, lines).discount : 0;
-    const total = subtotal - discount;
+    const charges = chargesFor(this.config, input.type, subtotal - discount);
+    const total = subtotal - discount + charges.reduce((n, c) => n + c.amount, 0);
     if (opts.payment) this.checkPayment(opts.payment, total);
 
     let stockTouched: string[] = [];
@@ -347,8 +380,8 @@ export class OrderService {
       const { lastInsertRowid } = this.db
         .prepare(
           `INSERT INTO orders (number, business_date, type, table_id, customer_name, notes, status, total, created_at, updated_at, client_ref, created_by,
-             member_id, subtotal, discount, reward_id, reward_name, points_redeemed, source, pickup_time, customer_phone, tracking_token)
-           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             member_id, subtotal, discount, reward_id, reward_name, points_redeemed, source, pickup_time, customer_phone, tracking_token, charges)
+           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           next,
@@ -372,6 +405,7 @@ export class OrderService {
           opts.pickupTime ?? null,
           opts.customerPhone ?? "",
           opts.trackingToken ?? null,
+          JSON.stringify(charges),
         );
       const orderId = Number(lastInsertRowid);
       const insertLine = this.db.prepare(
@@ -479,7 +513,16 @@ export class OrderService {
     const orders = this.list(date);
     const live = orders.filter((o) => o.status !== "cancelled");
     const paid = orders.filter((o) => o.payment.status === "paid");
-    const sum = (list: Order[]) => list.reduce((n, o) => n + o.total, 0);
+    // Paid orders count what was actually taken (after cash rounding); unpaid ones their total.
+    const sum = (list: Order[]) => list.reduce((n, o) => n + (o.payment.amount ?? o.total), 0);
+    const charges = new Map<string, { name: string; amount: number }>();
+    for (const o of paid) {
+      for (const c of o.charges) {
+        const row = charges.get(c.name) ?? { name: c.name, amount: 0 };
+        row.amount += c.amount;
+        charges.set(c.name, row);
+      }
+    }
     return {
       orders: live.length,
       items: live.reduce((n, o) => n + o.items.reduce((m, l) => m + l.quantity, 0), 0),
@@ -488,6 +531,10 @@ export class OrderService {
       sales: sum(paid),
       cash: sum(paid.filter((o) => o.payment.method === "cash")),
       card: sum(paid.filter((o) => o.payment.method === "card")),
+      qr: sum(paid.filter((o) => o.payment.method === "qr")),
+      /** Taxes and service charges collected on paid orders, e.g. SST for the tax return. */
+      charges: [...charges.values()],
+      rounding: paid.reduce((n, o) => n + o.payment.rounding, 0),
       unpaidTotal: sum(live.filter((o) => o.payment.status === "unpaid")),
       refunds: sum(orders.filter((o) => o.payment.status === "refunded")),
       /** Value given away as loyalty rewards on paid orders. */
@@ -517,7 +564,7 @@ export class OrderService {
       const hour = Math.floor(zonedNow(this.config.timezone, new Date(o.createdAt)).minutes / 60);
       const row = byHour.get(hour) ?? { orders: 0, sales: 0 };
       row.orders++;
-      row.sales += o.total;
+      row.sales += o.payment.amount ?? o.total;
       byHour.set(hour, row);
     }
 
@@ -530,7 +577,7 @@ export class OrderService {
       hours: [...byHour.entries()].sort(([a], [b]) => a - b).map(([hour, v]) => ({ hour, ...v })),
       refunds: orders
         .filter((o) => o.payment.status === "refunded")
-        .map((o) => ({ number: o.number, total: o.total, by: o.payment.refundedBy, reason: o.payment.refundReason })),
+        .map((o) => ({ number: o.number, total: o.payment.amount ?? o.total, by: o.payment.refundedBy, reason: o.payment.refundReason })),
     };
   }
 
@@ -701,23 +748,31 @@ export class OrderService {
     return [...touched];
   }
 
+  /** What the customer sees for a payment method, e.g. "DuitNow QR". */
+  methodName(method: PaymentMethod): string {
+    return method === "qr" ? (this.config.payments?.qrName ?? "QR payment") : method === "cash" ? "Cash" : "Card";
+  }
+
   private checkPayment(payment: PaymentInput, total: number): void {
-    if (!PAYMENT_METHODS.includes(payment?.method)) throw new ShopError("invalid_payment", "Payment method must be cash or card.");
+    const methods = paymentMethods(this.config);
+    if (!methods.includes(payment?.method)) throw new ShopError("invalid_payment", "Payment method must be " + methods.join(" or ") + ".");
     if (payment.method === "cash") {
       const t = payment.tendered;
-      if (!Number.isInteger(t) || t! < total) throw new ShopError("not_enough_cash", "Cash given is less than the total.");
-      if (t! > total + MAX_TENDER_OVER) throw new ShopError("invalid_payment", "That cash amount looks wrong. Check it and try again.");
+      const due = cashDue(this.config, total);
+      if (!Number.isInteger(t) || t! < due) throw new ShopError("not_enough_cash", "Cash given is less than the total.");
+      if (t! > due + MAX_TENDER_OVER) throw new ShopError("invalid_payment", "That cash amount looks wrong. Check it and try again.");
     }
   }
 
   private recordPayment(id: number, total: number, payment: PaymentInput, by?: Actor): void {
     const tendered = payment.method === "cash" ? payment.tendered! : total;
+    const rounding = payment.method === "cash" ? cashDue(this.config, total) - total : 0;
     this.db
       .prepare(
-        `UPDATE orders SET payment_status = 'paid', payment_method = ?, amount_tendered = ?, paid_at = ?, paid_by = ?, updated_at = ?
+        `UPDATE orders SET payment_status = 'paid', payment_method = ?, amount_tendered = ?, rounding = ?, paid_at = ?, paid_by = ?, updated_at = ?
          WHERE id = ? AND payment_status = 'unpaid'`,
       )
-      .run(payment.method, tendered, this.now().toISOString(), by?.name ?? "", this.now().toISOString(), id);
+      .run(payment.method, tendered, rounding, this.now().toISOString(), by?.name ?? "", this.now().toISOString(), id);
   }
 
   private load(where: string, params: (string | number)[]): Order[] {
@@ -752,6 +807,8 @@ export class OrderService {
       pickup_time: string | null;
       customer_phone: string;
       tracking_token: string | null;
+      charges: string;
+      rounding: number;
     }[];
     if (!rows.length) return [];
 
@@ -792,6 +849,7 @@ export class OrderService {
       status: r.status,
       subtotal: r.subtotal ?? r.total,
       discount: r.discount,
+      charges: JSON.parse(r.charges) as OrderCharge[],
       total: r.total,
       member: r.member_id !== null ? (members.get(r.member_id) ?? null) : null,
       reward: r.reward_id ? { id: r.reward_id, name: r.reward_name ?? r.reward_id, points: r.points_redeemed } : null,
@@ -806,7 +864,9 @@ export class OrderService {
         status: r.payment_status,
         method: r.payment_method,
         tendered: r.amount_tendered,
-        change: r.payment_status !== "unpaid" && r.amount_tendered !== null ? r.amount_tendered - r.total : null,
+        change: r.payment_status !== "unpaid" && r.amount_tendered !== null ? r.amount_tendered - r.total - r.rounding : null,
+        rounding: r.rounding,
+        amount: r.payment_status !== "unpaid" ? r.total + r.rounding : null,
         paidAt: r.paid_at,
         paidBy: r.paid_by,
         refundedAt: r.refunded_at,

@@ -1,0 +1,119 @@
+{
+  "timezone": "Asia/Kuala_Lumpur",
+  "currency": "MYR",
+  "locale": "en-MY",
+  "receipt": {
+    "address": "12 Jalan Contoh 3, Petaling Jaya, Selangor (fictional)",
+    "phone": "03-0000 4567",
+    "footer": "Terima kasih! 谢谢! Join Kopi Points: 1 point per RM1."
+  },
+  "referencePrefix": "KK",
+  "openingHours": {
+    "mon": ["07:00", "22:00"],
+    "tue": ["07:00", "22:00"],
+    "wed": ["07:00", "22:00"],
+    "thu": ["07:00", "22:00"],
+    "fri": ["07:00", "22:00"],
+    "sat": ["07:00", "23:00"],
+    "sun": ["07:00", "23:00"]
+  },
+  "closedDates": ["2027-02-06", "2027-02-07"],
+  "booking": {
+    "durationMinutes": 90,
+    "slotMinutes": 30,
+    "minNoticeMinutes": 60,
+    "maxDaysAhead": 30,
+    "maxActivePerPhone": 2
+  },
+  "tables": [
+    { "id": "M1", "name": "Meja 1", "seats": 2 },
+    { "id": "M2", "name": "Meja 2", "seats": 2 },
+    { "id": "M3", "name": "Meja 3", "seats": 4 },
+    { "id": "M4", "name": "Meja 4", "seats": 4 },
+    { "id": "M5", "name": "Meja Bulat 5", "seats": 6 },
+    { "id": "K1", "name": "Kaki Lima 1", "seats": 4 },
+    { "id": "K2", "name": "Kaki Lima 2", "seats": 4 }
+  ],
+  "optionGroups": [
+    {
+      "id": "temp",
+      "name": "Hot or iced",
+      "type": "single",
+      "choices": [
+        { "id": "hot", "name": "Hot (panas)", "price": 0, "default": true },
+        { "id": "iced", "name": "Iced (ais)", "price": 50 }
+      ]
+    },
+    {
+      "id": "sugar",
+      "name": "Sugar",
+      "type": "single",
+      "choices": [
+        { "id": "normal", "name": "Normal sugar", "price": 0, "default": true },
+        { "id": "less", "name": "Less sweet (kurang manis)", "price": 0 },
+        { "id": "none", "name": "No sugar (kosong)", "price": 0 }
+      ]
+    },
+    {
+      "id": "nasi-extras",
+      "name": "Add-ons",
+      "type": "multi",
+      "choices": [
+        { "id": "fried-chicken", "name": "Ayam goreng", "price": 450 },
+        { "id": "egg", "name": "Telur mata", "price": 150 },
+        { "id": "extra-sambal", "name": "Extra sambal", "price": 100 }
+      ]
+    }
+  ],
+  "menu": [
+    { "id": "kopi", "name": "Kopi", "category": "Kopi & Teh", "price": 280, "options": ["temp", "sugar"] },
+    { "id": "kopi-o", "name": "Kopi O", "category": "Kopi & Teh", "price": 230, "options": ["temp", "sugar"] },
+    { "id": "kopi-c", "name": "Kopi C", "category": "Kopi & Teh", "price": 300, "options": ["temp", "sugar"] },
+    { "id": "white-coffee", "name": "Ipoh White Coffee", "category": "Kopi & Teh", "price": 450, "options": ["temp", "sugar"] },
+    { "id": "teh-tarik", "name": "Teh Tarik", "category": "Kopi & Teh", "price": 320, "options": ["temp", "sugar"] },
+    { "id": "teh-o-limau", "name": "Teh O Limau", "category": "Kopi & Teh", "price": 350, "options": ["temp", "sugar"] },
+    { "id": "milo-dinosaur", "name": "Milo Dinosaur", "category": "Kopi & Teh", "price": 650 },
+    { "id": "barley-limau", "name": "Barley Limau", "category": "Kopi & Teh", "price": 400 },
+    { "id": "nasi-lemak", "name": "Nasi Lemak Biasa", "category": "Makanan", "price": 650, "options": ["nasi-extras"] },
+    { "id": "mee-goreng", "name": "Mee Goreng Mamak", "category": "Makanan", "price": 900 },
+    { "id": "roti-bakar", "name": "Roti Bakar Kaya Butter", "category": "Makanan", "price": 420 },
+    { "id": "half-boiled-eggs", "name": "Telur Separuh Masak (2)", "category": "Makanan", "price": 320 },
+    { "id": "kaya-toast-set", "name": "Set Roti Bakar (toast + 2 eggs + kopi)", "category": "Makanan", "price": 950 },
+    { "id": "curry-puff", "name": "Karipap", "category": "Kuih", "price": 200 },
+    { "id": "kuih-lapis", "name": "Kuih Lapis", "category": "Kuih", "price": 180 },
+    { "id": "onde-onde", "name": "Onde-Onde (3)", "category": "Kuih", "price": 300 }
+  ],
+  "stations": [
+    { "id": "bar", "name": "Drinks", "categories": ["Kopi & Teh"] },
+    { "id": "kitchen", "name": "Kitchen", "categories": ["Makanan", "Kuih"] }
+  ],
+  "charges": [
+    { "id": "service", "name": "Service charge 10%", "percent": 10, "dineInOnly": true },
+    { "id": "sst", "name": "SST 6%", "percent": 6 }
+  ],
+  "payments": { "methods": ["cash", "card", "qr"], "qrName": "DuitNow QR" },
+  "cashRounding": 5,
+  "loyalty": {
+    "name": "Kopi Points",
+    "pointsPerDollar": 1,
+    "expiryMonths": 12,
+    "rewards": [
+      { "id": "free-kopi", "name": "Free kopi or teh", "points": 30, "parts": [{ "label": "kopi or teh", "categories": ["Kopi & Teh"] }] },
+      { "id": "free-kuih", "name": "Free kuih", "points": 20, "parts": [{ "label": "kuih", "categories": ["Kuih"] }] },
+      {
+        "id": "breakfast-set",
+        "name": "Free breakfast (nasi lemak + teh tarik)",
+        "points": 90,
+        "parts": [
+          { "label": "nasi lemak", "items": ["nasi-lemak"] },
+          { "label": "teh tarik", "items": ["teh-tarik"] }
+        ]
+      }
+    ]
+  },
+  "orderAhead": {
+    "prepMinutes": 10,
+    "maxItems": 15,
+    "maxOpenPerPhone": 2
+  }
+}

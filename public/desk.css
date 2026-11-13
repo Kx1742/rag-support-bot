@@ -1933,6 +1933,12 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.pay-rounding {
+  margin: -6px 0 0;
+  text-align: right;
+  font-size: 13px;
+}
+
 .tender-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));

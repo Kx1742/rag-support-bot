@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { BOOKING_STATUSES, type BookingStatus } from "../shop/bookings.ts";
+import { paymentMethods } from "../shop/config.ts";
 import { ORDER_STATUSES, type OrderInput, type OrderStatus, PAYMENT_METHODS, type PaymentInput } from "../shop/orders.ts";
 import type { MenuItemInput } from "../shop/menu.ts";
 import type { Shop, ShopChange } from "../shop/shop.ts";
@@ -300,6 +301,9 @@ function deskInfo(shop: Shop, user: CurrentUser & { tenantId?: string }) {
     timezone: shop.config.timezone,
     currency: shop.config.currency,
     locale: shop.config.locale ?? "en-US",
+    charges: shop.config.charges ?? [],
+    payments: { methods: paymentMethods(shop.config), qrName: shop.config.payments?.qrName ?? "QR payment" },
+    cashRounding: shop.config.cashRounding ?? 1,
     today: shop.bookings.today().date,
     tables: shop.config.tables,
     stations: shop.config.stations ?? [],
@@ -343,7 +347,7 @@ function parseMenuItem(b: Record<string, unknown>): MenuItemInput {
 function parsePayment(raw: unknown): PaymentInput {
   const p = (raw ?? {}) as { method?: unknown; tendered?: unknown };
   const method = String(p.method ?? "") as PaymentInput["method"];
-  if (!PAYMENT_METHODS.includes(method)) throw new HttpError(400, "Payment method must be cash or card");
+  if (!PAYMENT_METHODS.includes(method)) throw new HttpError(400, "Unknown payment method");
   return { method, tendered: p.tendered === undefined ? undefined : Number(p.tendered) };
 }
 

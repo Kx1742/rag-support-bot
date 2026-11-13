@@ -65,6 +65,16 @@ export interface ShopConfig {
   stations?: { id: string; name: string; categories: string[] }[];
   /** Optional loyalty program. Leave out to turn loyalty off. */
   loyalty?: LoyaltyConfig;
+  /**
+   * Taxes and service charges added to every order, in this order. Each is a percentage of the
+   * amount so far (after any reward), so a tax listed after a service charge is also charged on
+   * it, as Malaysian SST is. dineInOnly charges skip takeaway and online orders.
+   */
+  charges?: ChargeConfig[];
+  /** Ways to pay at the till (default cash and card). "qr" is a bank QR such as DuitNow. */
+  payments?: { methods: PaymentMethodId[]; qrName?: string };
+  /** Round cash totals to this many cents, e.g. 5 for Malaysia's 5-sen rounding. Card and QR pay exactly. */
+  cashRounding?: number;
   /** Optional order-ahead (pickup) settings. Leave out to turn online ordering off. */
   orderAhead?: {
     /** Minutes needed to make an order; earliest pickup is now + this. */
@@ -74,6 +84,17 @@ export interface ShopConfig {
     /** Most open online orders per phone number at once. */
     maxOpenPerPhone: number;
   };
+}
+
+export const PAYMENT_METHOD_IDS = ["cash", "card", "qr"] as const;
+export type PaymentMethodId = (typeof PAYMENT_METHOD_IDS)[number];
+
+export interface ChargeConfig {
+  id: string;
+  /** Shown on receipts and reports, e.g. "SST 6%" or "Service charge 10%". */
+  name: string;
+  percent: number;
+  dineInOnly?: boolean;
 }
 
 /** One reward, e.g. "Free drink" for 100 points. Each part makes one matching item free. */
@@ -91,6 +112,30 @@ export interface LoyaltyConfig {
   /** Points expire after this many months without any activity. */
   expiryMonths: number;
   rewards: LoyaltyReward[];
+}
+
+/** The charges on an order of this type, with amounts in cents (each rounded to the cent). */
+export function chargesFor(config: Pick<ShopConfig, "charges">, type: "takeaway" | "dine_in", amount: number) {
+  let running = amount;
+  const out: { id: string; name: string; percent: number; amount: number }[] = [];
+  for (const ch of config.charges ?? []) {
+    if (ch.dineInOnly && type !== "dine_in") continue;
+    const value = Math.round((running * ch.percent) / 100);
+    out.push({ id: ch.id, name: ch.name, percent: ch.percent, amount: value });
+    running += value;
+  }
+  return out;
+}
+
+/** What a cash customer pays: the total rounded to the shop's smallest coin (e.g. 5 sen). */
+export function cashDue(config: Pick<ShopConfig, "cashRounding">, total: number): number {
+  const step = config.cashRounding ?? 1;
+  return Math.round(total / step) * step;
+}
+
+/** Enabled payment methods (default cash and card). */
+export function paymentMethods(config: Pick<ShopConfig, "payments">): PaymentMethodId[] {
+  return config.payments?.methods ?? ["cash", "card"];
 }
 
 /** Loads tenants/<id>/shop.json. Returns null when the tenant has no shop features. */
@@ -190,6 +235,23 @@ export function validateShopConfig(c: ShopConfig): void {
     if (!st.name || !st.categories?.length) fail(`station ${st.id} needs a name and at least one category`);
     stationIds.add(st.id);
   }
+  const chargeIds = new Set<string>();
+  for (const ch of c.charges ?? []) {
+    if (!/^[a-z0-9-]+$/.test(ch.id) || chargeIds.has(ch.id)) fail(`duplicate or invalid charge id "${ch.id}"`);
+    if (!ch.name || ch.name.length > 40) fail(`charge ${ch.id} needs a name (up to 40 characters)`);
+    if (typeof ch.percent !== "number" || !(ch.percent > 0 && ch.percent <= 30)) fail(`charge ${ch.id} percent must be above 0 and at most 30`);
+    chargeIds.add(ch.id);
+  }
+  if (c.payments) {
+    const m = c.payments.methods;
+    if (!Array.isArray(m) || !m.length || m.some((x) => !PAYMENT_METHOD_IDS.includes(x)) || new Set(m).size !== m.length) {
+      fail(`payments.methods must list some of ${PAYMENT_METHOD_IDS.join(", ")}`);
+    }
+    if (c.payments.qrName !== undefined && (typeof c.payments.qrName !== "string" || !c.payments.qrName || c.payments.qrName.length > 30)) {
+      fail("payments.qrName must be text up to 30 characters");
+    }
+  }
+  if (c.cashRounding !== undefined && ![1, 5, 10].includes(c.cashRounding)) fail("cashRounding must be 1, 5 or 10 (cents)");
   if (c.orderAhead) {
     const o = c.orderAhead;
     for (const key of ["prepMinutes", "maxItems", "maxOpenPerPhone"] as const) {

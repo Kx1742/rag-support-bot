@@ -1,3 +1,4 @@
+import type { OrderLineInput } from "./orders.ts";
 import type { Shop } from "./shop.ts";
 import type { Role } from "./staff.ts";
 import { addDays, toMinutes } from "./time.ts";
@@ -38,14 +39,26 @@ export async function seedDemo(shop: Shop): Promise<void> {
   const member = shop.loyalty.enabled ? tryIt(() => shop.loyalty.join(DEMO_MEMBER_PHONE, "Demo Member")) : null;
   if (member) shop.loyalty.change(member.id, 120, "Demo welcome points");
 
+  // Works for any café: each line names a preferred item per demo café (first one on this menu wins),
+  // and only keeps the options that item actually has.
+  const menu = shop.menu.list();
+  const itemId = (ids: string[]) => ids.find((id) => menu.some((m) => m.id === id)) ?? ids[0];
+  const line = (ids: string[], quantity: number, options: Record<string, string | string[]> = {}): OrderLineInput => {
+    const item = menu.find((m) => m.id === itemId(ids));
+    const kept = Object.fromEntries(Object.entries(options).filter(([group]) => item?.options.includes(group)));
+    return { itemId: itemId(ids), quantity, options: kept };
+  };
+  const qrOrCard = shop.config.payments?.methods.includes("qr") ? "qr" : "card";
+  const fourSeater = shop.config.tables.find((t) => t.seats === 4)?.id ?? shop.config.tables[0]?.id;
+
   // Stock counts, one of them running low.
-  tryIt(() => shop.menu.setStock("croissant", 8));
-  tryIt(() => shop.menu.setStock("almond-croissant", 2));
+  tryIt(() => shop.menu.setStock(itemId(["croissant", "curry-puff"]), 8));
+  tryIt(() => shop.menu.setStock(itemId(["almond-croissant", "kuih-lapis"]), 2));
 
   // Orders in every kitchen stage.
   const by = { name: "Demo Barista" };
   const done = tryIt(() =>
-    shop.orders.create({ type: "takeaway", customerName: "Sam", items: [{ itemId: "latte", quantity: 2 }] }, { by, payment: { method: "card" } }),
+    shop.orders.create({ type: "takeaway", customerName: "Sam", items: [line(["latte", "kopi"], 2)] }, { by, payment: { method: "card" } }),
   );
   if (done) {
     shop.orders.setStatus(done.id, "ready");
@@ -53,7 +66,7 @@ export async function seedDemo(shop: Shop): Promise<void> {
   }
   const ready = tryIt(() =>
     shop.orders.create(
-      { type: "takeaway", customerName: "Lena", items: [{ itemId: "mocha", quantity: 1, options: { size: "large" } }] },
+      { type: "takeaway", customerName: "Lena", items: [line(["mocha", "teh-tarik"], 1, { size: "large", temp: "iced" })] },
       { by, payment: { method: "cash", tendered: 1000 } },
     ),
   );
@@ -65,11 +78,11 @@ export async function seedDemo(shop: Shop): Promise<void> {
         customerName: "Demo Member",
         memberId: member?.id ?? null,
         items: [
-          { itemId: "flat-white", quantity: 1, options: { milk: "oat" } },
-          { itemId: "croissant", quantity: 1, options: { "food-extras": ["warmed"] } },
+          line(["flat-white", "white-coffee"], 1, { milk: "oat", sugar: "less" }),
+          line(["croissant", "nasi-lemak"], 1, { "food-extras": ["warmed"], "nasi-extras": ["egg"] }),
         ],
       },
-      { by, payment: { method: "card" } },
+      { by, payment: { method: qrOrCard } },
     ),
   );
   if (preparing) shop.orders.setStatus(preparing.id, "preparing");
@@ -77,12 +90,9 @@ export async function seedDemo(shop: Shop): Promise<void> {
     shop.orders.create(
       {
         type: "dine_in",
-        tableId: "T4",
-        notes: "No onions on the toast",
-        items: [
-          { itemId: "avo-toast", quantity: 1 },
-          { itemId: "chai", quantity: 2 },
-        ],
+        tableId: fourSeater,
+        notes: itemId(["avo-toast", "mee-goreng"]) === "avo-toast" ? "No onions on the toast" : "Mee goreng tak nak pedas (not spicy)",
+        items: [line(["avo-toast", "mee-goreng"], 1), line(["chai", "teh-o-limau"], 2, { temp: "iced" })],
       },
       { by },
     ),
@@ -92,7 +102,7 @@ export async function seedDemo(shop: Shop): Promise<void> {
       name: "Online Olivia",
       phone: "5550100200",
       pickupTime: "asap",
-      items: [{ itemId: "cold-brew", quantity: 1, options: { milk: "oat" } }],
+      items: [line(["cold-brew", "kopi-c"], 1, { milk: "oat", temp: "iced", sugar: "none" })],
     }),
   );
 

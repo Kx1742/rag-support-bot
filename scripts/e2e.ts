@@ -23,6 +23,8 @@ const ARTIFACTS = join(ROOT, "e2e-artifacts");
 const work = mkdtempSync(join(tmpdir(), "e2e-"));
 const tenants = join(work, "tenants");
 cpSync(join(ROOT, "tenants", TENANT), join(tenants, TENANT), { recursive: true });
+// The Malaysian demo café, as is (its till test doesn't depend on opening hours).
+cpSync(join(ROOT, "tenants", "kopi-kita"), join(tenants, "kopi-kita"), { recursive: true });
 const shopFile = join(tenants, TENANT, "shop.json");
 const shop = JSON.parse(readFileSync(shopFile, "utf8"));
 const offset = 12 - new Date().getUTCHours(); // hours to add to UTC to reach ~12:00
@@ -217,6 +219,29 @@ try {
     assert(hidden.every(Boolean), "Report and Staff tabs should be hidden for a barista");
     const status = await desk.run<number>(`return (await fetch("/api/desk/report")).status;`);
     assert(status === 403, `report API should be 403 for a barista, got ${status}`);
+  });
+
+  await test("Malaysian café: service charge and SST on a dine-in order, paid by DuitNow QR", async () => {
+    // Opening another café's desk logs out of this one first.
+    await desk.goto(`${BASE}/desk?tenant=kopi-kita`);
+    await desk.waitFor(`!document.getElementById("login-view").hidden && document.querySelector("#demo-box button")`, { what: "Kopi Kita login" });
+    await desk.run(`[...document.querySelectorAll("#demo-box button")].find((b) => b.textContent.includes("Manager")).click();`);
+    await desk.waitFor(`!document.getElementById("desk-view").hidden && document.title.includes("Kopi Kita")`, { what: "Kopi Kita desk" });
+    await desk.run(`
+      document.querySelector('[data-tab="till"]').click();
+      document.querySelector('#order-type button[data-type="dine_in"]').click();
+      document.querySelector("#table-chips button").click();
+      [...document.querySelectorAll(".tile")].find((t) => t.textContent.startsWith("Milo Dinosaur")).click();
+    `);
+    // RM6.50 + 10% service charge (RM0.65) + 6% SST on both (RM0.43) = RM7.58
+    await desk.waitFor(`/^Charge RM\\s?7\\.58$/.test(document.getElementById("charge-order").textContent)`, { what: "charge RM 7.58" });
+    await desk.run(`document.getElementById("charge-order").click();`);
+    await desk.waitFor(`document.getElementById("pay-dialog").open`);
+    await desk.run(`document.querySelector('#pay-method button[data-method="qr"]').click();`);
+    const submit = await desk.run<string>(`return document.getElementById("pay-submit").textContent;`);
+    assert(/Payment received · RM\s?7\.58/.test(submit), `QR pays the exact total, got "${submit}"`);
+    await desk.run(`document.getElementById("pay-submit").click();`);
+    await desk.waitFor(`[...document.querySelectorAll(".toast")].some((t) => /paid/.test(t.textContent))`, { what: "paid toast" });
   });
 
   await test("customers can switch the chat to 中文 and the pickup screen to Malay", async () => {

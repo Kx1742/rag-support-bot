@@ -1,5 +1,5 @@
 // Usage: npm start (or npm run start:demo for the public demo)   (then open http://localhost:3000, staff desk at /desk, pickup screen at /display)
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createAssistant, createProviders, loadEnv } from "../app.ts";
 import type { Assistant } from "../rag/assistant.ts";
@@ -22,6 +22,12 @@ const backupEveryHours = Number(env.BACKUP_EVERY_HOURS ?? 24);
 
 function tenantExists(tenantId: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,62}$/.test(tenantId) && existsSync(join(tenantsDir(), tenantId, "tenant.json"));
+}
+
+/** Businesses with shop features (a shop.json), default business first. */
+function shopTenants(): string[] {
+  const ids = readdirSync(tenantsDir()).filter((id) => tenantExists(id) && existsSync(join(tenantsDir(), id, "shop.json")));
+  return [defaultTenant, ...ids.filter((id) => id !== defaultTenant).sort()].filter((id) => ids.includes(id));
 }
 
 /** Caches one promise per tenant; a failed load is forgotten so the next request retries. */
@@ -72,6 +78,10 @@ const server = createAppServer({
     ? {
         accounts: DEMO_ACCOUNTS.map(({ username, pin, role }) => ({ username, pin, role })),
         resetsAt: `${String(DEMO_RESET_HOUR).padStart(2, "0")}:00`,
+        cafes: shopTenants().map((id) => ({
+          id,
+          name: (JSON.parse(readFileSync(join(tenantsDir(), id, "tenant.json"), "utf8")) as { name: string }).name,
+        })),
       }
     : null,
 });
@@ -128,14 +138,15 @@ server.listen(port, async () => {
   console.log(`Data folder: ${dataDir()}`);
 
   if (demo) {
-    const shop = await getShop(defaultTenant);
-    if (shop) {
+    // Every demo café gets sample data, reset nightly in its own timezone.
+    for (const tenantId of shopTenants()) {
+      const shop = await getShop(tenantId);
+      if (!shop) continue;
       if (shop.staff.count() === 0) await resetDemo(shop, "loaded");
       scheduleNightlyReset(shop);
-      console.log(
-        `PUBLIC DEMO MODE: logins ${DEMO_ACCOUNTS.map((a) => `${a.username}/${a.pin}`).join(", ")}; data resets daily at ${String(DEMO_RESET_HOUR).padStart(2, "0")}:00 (${shop.config.timezone}).`,
-      );
+      console.log(`Demo café ${tenantId}: data resets daily at ${String(DEMO_RESET_HOUR).padStart(2, "0")}:00 (${shop.config.timezone}).`);
     }
+    console.log(`PUBLIC DEMO MODE: logins ${DEMO_ACCOUNTS.map((a) => `${a.username}/${a.pin}`).join(", ")}.`);
   } else if (!staffAuth.ownerEnabled(defaultTenant)) {
     console.log('No owner password: set STAFF_PASSWORD (8+ characters) in .env to log in as "owner" and add staff accounts.');
   }

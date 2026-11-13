@@ -13,12 +13,23 @@ order queue, a bookings list and menu controls, all updating live.
   take cash or card payment, and move orders through New → Preparing → Ready
 - **Managers** also refund orders, see the end-of-day sales report, and manage staff accounts
 
-It's multi-tenant: each business is a folder with its own documents, menu, tables and opening hours.
+It's multi-tenant: each business is a folder with its own documents, menu, tables, opening hours,
+currency, taxes and payment methods. The demo runs two very different cafés from the same code:
 
-> The demo business, **Bean & Byte Café**, is fictional. Its documents and menu are made up for this project.
+| | **Bean & Byte Café** | **Kopi Kita** (`/?tenant=kopi-kita`) |
+|---|---|---|
+| Style | Specialty coffee, US | Modern kopitiam, Petaling Jaya, Malaysia |
+| Money | US dollars | Ringgit (RM), cash rounded to the nearest 5 sen |
+| Tax | None | 6% SST on everything, 10% service charge for dine-in only |
+| Payments | Cash, card | Cash, card, **DuitNow QR** |
+| Documents | English | English, 中文 and Bahasa Melayu |
+| Menu | Lattes with size and milk options | Kopi, teh tarik (hot/iced, kurang manis/kosong), nasi lemak with add-ons, kuih |
+
+> Both businesses are fictional. Their documents and menus are made up for this project.
 
 **Live demo:** _coming soon_ <!-- TODO: paste the Render URL here after deploying -->
-In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager**. The data resets every night.
+In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager**. Switch café with the
+**Try Kopi Kita** / **Try Bean & Byte Café** link in the chat. The data resets every night.
 
 ## Screenshots
 
@@ -61,6 +72,16 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Follow-up questions, suggested questions, business branding, dark mode, works on phones
 - **Installable app (PWA)**: add the desk or the chat to a tablet/phone home screen; pages still open on flaky Wi-Fi (live data is never cached)
 
+**Malaysia-ready** (all set per business in `shop.json`)
+- **SST and service charge**: any list of percentage charges, in order, each on the amount so far
+  (so SST is also charged on the service charge, as Malaysian law requires); charges can be dine-in only
+- **Cash rounding** to the nearest 5 sen (Bank Negara Malaysia's rule); card and QR pay the exact amount;
+  the receipt shows the rounding and the amount paid
+- **DuitNow QR** as a payment method alongside cash and card, in the till, receipts and the report
+- **Prices in the café's own currency** everywhere (RM, $...)
+- End-of-day report shows **SST and service charge collected** and QR takings, also in the CSV
+- Chinese and Malay questions work even in offline mode (Chinese text is searched in two-character pieces)
+
 **Staff desk** (`/desk`, each person logs in with their own username + PIN)
 - **Till / POS**: menu grid by category, item search, **drink options** (size, milk, extra shot, iced...)
   with per-item notes, takeaway or dine-in by table
@@ -94,8 +115,8 @@ In the demo, open the staff desk and tap **Try as Barista** or **Try as Manager*
 - Rate limiting, a daily AI message cap, strict Content-Security-Policy, no `innerHTML`
 - Production basics: health check that tests the database, HSTS on HTTPS, a request id on every
   response (shown to visitors on errors), request logs that never include query strings
-- 152 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
-- 11 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, switching language, phone layout); they run on every push, with failure screenshots saved
+- 161 unit and API tests, all offline: fake AI, in-memory SQLite, real HTTP server on a random port
+- 12 end-to-end browser tests (`npm run e2e`): headless Chrome/Edge clicks through real journeys across several tabs (order ahead with live tracking, till payment with change, table booking, pickup screen, role restrictions, a Malaysian dine-in order with SST paid by DuitNow QR, switching language, phone layout); they run on every push, with failure screenshots saved
 
 ## How it works
 
@@ -193,6 +214,8 @@ them. Unexpected errors are not.
 | One receipt builder on the server for the till and the customer | Printed and digital receipts can't disagree. |
 | E2E tests run their own server on a test copy of the café that is open all day, at local midday | Results don't depend on what time CI happens to run. |
 | Service worker caches pages only, network-first, never `/api/` | Staff always see live orders and payments; only the page shell survives a dropped connection. |
+| Charges and cash rounding stored on each order (charges when ordered, rounding when paid in cash) | Old receipts and reports stay right after a tax rate changes, and the report can show exactly how much SST was collected. |
+| Cash rounding applied at payment, not to the order total | The same order costs RM10.81 by card or DuitNow but RM10.80 in cash, as at a real Malaysian till. |
 | Customer pages translated in the browser from one small file; café content left as written | Adding a language is one dictionary; menus and documents stay exactly as the café wrote them. |
 | Offline mode (keyword search, no AI) | Develop and demo without an API key. |
 
@@ -218,8 +241,8 @@ Other commands:
 ```bash
 npm run dev                   # restart on file changes
 npm run chat -- bean-and-byte # chat in the terminal
-npm test                      # 152 unit and API tests
-npm run e2e                   # 11 browser tests (needs Edge or Chrome)
+npm test                      # 161 unit and API tests
+npm run e2e                   # 12 browser tests (needs Edge or Chrome)
 npm run typecheck
 npm run screenshots           # README screenshots from a running demo (needs Edge or Chrome)
 ```
@@ -270,11 +293,25 @@ it's safe while the server is running.
 tenants/
   my-shop/
     tenant.json   # name, assistant name, tone, contact, brand color, suggested questions
-    shop.json     # optional: timezone, opening hours, tables, booking rules, menu with prices
+    shop.json     # optional: timezone, currency, opening hours, tables, booking rules, menu with prices,
+                  #           taxes/service charges, payment methods, cash rounding
     docs/*.md     # FAQs, policies, menu text for the chatbot
 ```
 
 Without `shop.json` the business gets the chatbot only. Data is stored in `data/<id>/` (git-ignored).
+
+Taxes and payments, e.g. for Malaysia (see [`tenants/kopi-kita/shop.json`](tenants/kopi-kita/shop.json)):
+
+```json
+"currency": "MYR",
+"locale": "en-MY",
+"charges": [
+  { "id": "service", "name": "Service charge 10%", "percent": 10, "dineInOnly": true },
+  { "id": "sst", "name": "SST 6%", "percent": 6 }
+],
+"payments": { "methods": ["cash", "card", "qr"], "qrName": "DuitNow QR" },
+"cashRounding": 5
+```
 
 ### API
 
@@ -316,6 +353,7 @@ Without `shop.json` the business gets the chatbot only. Data is stored in `data/
 - [x] Deploy-ready: public demo mode, Dockerfile, Render blueprint, backups
 - [x] Screenshots in this README
 - [x] Customer chat and pickup screen in English, 中文 and Bahasa Melayu
+- [x] Second demo café in Malaysia: RM, SST, service charge, 5-sen rounding, DuitNow QR
 - [ ] Put the live demo URL in this README
 - [ ] Booking confirmations by SMS/email; WhatsApp channel
 

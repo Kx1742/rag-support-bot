@@ -163,6 +163,8 @@ describe("HTTP server", () => {
       chatBookings: false,
       brandColor: null,
       orderAhead: false,
+      money: null,
+      payments: null,
       loyalty: null,
       booking: null,
     });

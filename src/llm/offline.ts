@@ -11,9 +11,21 @@ const DIMENSIONS = 512;
  * ("7", "00"), which would match everything.
  */
 export function keywords(text: string): string[] {
-  return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
-    .filter((w) => !STOP_WORDS.has(w) && !/^\d+$/.test(w) && w.length >= 2)
-    .map(stem);
+  const words: string[] = [];
+  for (const token of text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) {
+    // Chinese has no spaces between words, so split runs of Chinese characters into overlapping
+    // pairs ("营业时间" -> 营业, 业时, 时间): a common way to search Chinese without a dictionary.
+    for (const part of token.split(/(\p{Script=Han}+)/u)) {
+      if (!part) continue;
+      if (/^\p{Script=Han}+$/u.test(part)) {
+        if (part.length === 1) words.push(part);
+        for (let i = 0; i < part.length - 1; i++) words.push(part.slice(i, i + 2));
+      } else if (!STOP_WORDS.has(part) && !/^\d+$/.test(part) && part.length >= 2) {
+        words.push(stem(part));
+      }
+    }
+  }
+  return words;
 }
 
 /** Very small stemmer: "opening" -> "open", "hours" -> "hour", "catered" -> "cater". */

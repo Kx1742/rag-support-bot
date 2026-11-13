@@ -138,7 +138,7 @@ Table bookings:
 
 /** The live menu in a compact form for the model (prices as text, low stock only). */
 export function liveMenu(shop: Shop) {
-  const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: shop.config.currency });
+  const fmt = new Intl.NumberFormat(shop.config.locale ?? "en-US", { style: "currency", currency: shop.config.currency });
   const groups = new Map(shop.menu.optionGroups().map((g) => [g.id, g]));
   return {
     items: shop.menu.list().map((m) => ({

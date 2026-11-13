@@ -6,6 +6,7 @@ import type { Assistant } from "../rag/assistant.ts";
 import type { Shop, ShopChange } from "../shop/shop.ts";
 import { isDate } from "../shop/time.ts";
 import type { TenantConfig } from "../types.ts";
+import { chargesFor, paymentMethods } from "../shop/config.ts";
 import type { StaffAuth } from "./auth.ts";
 import { handleDesk } from "./desk.ts";
 import {
@@ -41,7 +42,12 @@ export interface ServerDeps {
   mode?: string;
   log?: (message: string) => void;
   /** Public demo settings shown to visitors (demo logins, reset time). */
-  demo?: { accounts: { username: string; pin: string; role: string }[]; resetsAt: string } | null;
+  demo?: {
+    accounts: { username: string; pin: string; role: string }[];
+    resetsAt: string;
+    /** Demo cafés visitors can switch between. */
+    cafes?: { id: string; name: string }[];
+  } | null;
   /** Log one line per API request (method, path, status, time). */
   logRequests?: boolean;
   /** App version shown by /api/health. */
@@ -186,7 +192,9 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
         .list()
         .filter((m) => m.available)
         .map(({ id, name, category, price, options, stock }) => ({ id, name, category, price, options, lowStock: stock !== null && stock <= 5 ? stock : null }));
-      sendJson(res, 200, { menu, optionGroups: shop.menu.optionGroups(), ordering: shop.orders.pickupSlots() });
+      // Charges that apply to a takeaway order, so the customer sees the real total before ordering.
+      const charges = (shop.config.charges ?? []).filter((c) => !c.dineInOnly).map(({ id, name, percent }) => ({ id, name, percent }));
+      sendJson(res, 200, { menu, optionGroups: shop.menu.optionGroups(), ordering: shop.orders.pickupSlots(), charges });
       return;
     }
     if (action === "orders" && req.method === "POST") {
@@ -355,6 +363,9 @@ export function publicTenantInfo(t: TenantConfig, shop: Shop | null = null, canU
     chatBookings: !!shop && canUseTools,
     brandColor: t.brandColor && /^#[0-9a-f]{6}$/i.test(t.brandColor) ? t.brandColor : null,
     orderAhead: !!shop?.config.orderAhead,
+    money: shop ? { currency: shop.config.currency, locale: shop.config.locale ?? "en-US" } : null,
+    /** How customers can pay at the counter, e.g. ["cash", "card", "DuitNow QR"]. */
+    payments: shop ? paymentMethods(shop.config).map((m) => (m === "qr" ? (shop.config.payments?.qrName ?? "QR payment") : m)) : null,
     loyalty: shop?.config.loyalty ? { name: shop.config.loyalty.name } : null,
     booking: shop
       ? {

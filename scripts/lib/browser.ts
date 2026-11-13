@@ -95,7 +95,14 @@ export class Browser {
 
   close(): void {
     this.process.kill();
-    setTimeout(() => rmSync(this.profile, { recursive: true, force: true }), 500);
+    // Windows keeps the profile locked for a moment after the browser exits: retry, and never fail the run over a temp folder.
+    setTimeout(() => {
+      try {
+        rmSync(this.profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch {
+        /* left for the OS to clean up */
+      }
+    }, 500);
   }
 }
 

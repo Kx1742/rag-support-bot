@@ -708,6 +708,11 @@ button {
   gap: 10px;
 }
 
+/* SST / service charge rows: amount lines up with the item prices (the 32px column is the − button). */
+.cart-charge {
+  grid-template-columns: 1fr auto 32px;
+}
+
 .small-btn {
   width: 32px;
   height: 32px;
